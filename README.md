@@ -1,2 +1,2 @@
-# qnx-rtos-sorting-filter
-Description
+## Real-Time Multi-Core Sorting and Median Filter Service  
+The client continuously offloads unsorted floating-point time-series metrics (≥64 KB) to the server. The server implements a parallel Merge-Sort algorithm across multiple worker threads, using mutexes and condition variables to control the recursive merging phases across partitioned memory. In addition, the server computes rolling median filters to eliminate sensor outliers. On completion, the server sends a QNX pulse event back to the client with the calculated median and memory-offset descriptor.
