@@ -3,6 +3,57 @@
 All notable changes to this repository are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## Generated dataset — statistics
+
+What the default full build currently produces (`uv run python -m battery_dataset`,
+seed `20251007`), measured from `data/artifacts/`.
+
+### Runs by type
+
+54 runs in total, and every axis is evenly covered:
+
+| Axis | Value | Runs |
+| --- | --- | --- |
+| Cell | LG M50 (`Chen2020`) | 18 |
+| | graphite/NMC532 pouch (`Mohtat2020`) | 18 |
+| | Enertech (`Ai2020`) | 18 |
+| C-rate | 0.5C | 18 |
+| | 1C | 18 |
+| | 2C | 18 |
+| Ambient temperature | 5 °C / 25 °C / 45 °C | 18 each |
+| Experiment | `discharge` | 27 |
+| | `cccv` | 27 |
+
+That is **27 unique cell × C-rate × temperature combinations, each simulated
+twice** — once as a discharge, once as a CC-CV charge. No combination is
+missing and none is duplicated.
+
+### Size
+
+| Quantity | Value |
+| --- | --- |
+| Runs (records) | 54 |
+| Samples per run | 60 000 |
+| Channels per sample | 4 — `time_s`, `current_A`, `voltage_V`, `temperature_K` |
+| Sample rows across all runs | 3 240 000 |
+| Scalar values in the tensor | 12 960 000 |
+| npz payload (array bytes) | 116 640 000 B = 111.2 MiB = 792 × 64 KiB blocks |
+| npz file on disk | 116 662 212 B |
+| CSV files | 55 (54 run files + 1 index) |
+| CSV total on disk | 271.3 MB |
+| Figures | 5 PNGs, 1.8 MiB |
+
+### Signal and corruption statistics
+
+| Quantity | Value |
+| --- | --- |
+| Run duration | 0.68 h – 3.64 h (median 1.56 h) |
+| Temperature rise across the 18 runs at 2C | 1.53 K – 25.87 K |
+| Corrupted samples — current | 48 244 (1.4890 %) |
+| Corrupted samples — voltage | 48 259 (1.4895 %) |
+| Corrupted samples — temperature | 48 260 (1.4895 %) |
+| Corrupted samples — total | 144 763 of 9 720 000 sensor cells (1.489 %) |
+
 ## [Unreleased] — 2026-10-07
 
 ### Added
