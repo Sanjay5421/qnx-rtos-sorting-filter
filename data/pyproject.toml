@@ -4,7 +4,8 @@ version = "0.1.0"
 description = "Synthetic multi-channel battery sensor dataset generator (PyBaMM) used as the client payload for the sorting / median-filter service"
 readme = { text = "Synthetic multi-channel battery sensor dataset generator (PyBaMM), producing the client payload for the sorting / median-filter service.", content-type = "text/markdown" }
 authors = [
-    { name = "Anmol Krishhhhhhh", email = "162597538+Anmol-G-K@users.noreply.github.com" }
+    { name = "Anmol Govindarajapuram Krishnan", email = "162597538+Anmol-G-K@users.noreply.github.com" },
+    { name = "Mirage", email = "155567810+Sanjay5421@users.noreply.github.com" },
 ]
 requires-python = ">=3.10"
 dependencies = [

@@ -79,6 +79,10 @@ missing and none is duplicated.
 
 ### Changed
 
+- **Both authors listed** in `data/pyproject.toml`, sourced from the git history
+  and the GitHub API: [@Anmol-G-K](https://github.com/Anmol-G-K) and
+  [@Sanjay5421](https://github.com/Sanjay5421), each with their GitHub no-reply
+  address.
 - **Project renamed** `data` → `battery-dataset`, package `data` →
   `battery_dataset`, so the package directory no longer repeats the project
   directory name (`data/src/data/`).
