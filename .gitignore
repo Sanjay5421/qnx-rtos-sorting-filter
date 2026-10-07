@@ -1,0 +1,9 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Virtual environments (uv creates .venv/.gitignore, this is belt and braces)
+.venv/
+
+# Generated dataset artefacts (~370 MiB: .npz payload, ~55 CSVs, figures)
+data/artifacts/
