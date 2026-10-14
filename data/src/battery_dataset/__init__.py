@@ -96,9 +96,7 @@ def main(argv: list[str] | None = None) -> int:
 
     config = DatasetConfig()
     if args.quick:
-        config = replace(config, samples_per_run=4000, c_rates=(1.0,), ambient_c=(25.0,),
-                         profiles=("discharge",))
-        args.runs = 3
+        config = replace(config, samples_per_run=4000)
     if args.output_dir is not None:
         config = replace(config, output_dir=args.output_dir)
     if args.samples is not None:

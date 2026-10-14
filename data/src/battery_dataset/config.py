@@ -44,8 +44,12 @@ class CellSpec:
     thermal_rise_2c_k: float
 
 
-#: Selected cells: three physically distinct cells, each with usable thermal
-#: dynamics and a complete lumped-thermal parameterisation.
+#: Cells available to the sweep, each with a complete lumped-thermal
+#: parameterisation and the 2C thermal rise that is the selection criterion.
+#:
+#: The default build uses ``Chen2020`` only -- the LG M50 is the best-evidenced
+#: of the three and has by far the strongest temperature signal, so it is the
+#: one carried into the dataset. The others remain one config change away.
 #:
 #: Deliberately excluded, with the reason:
 #:   * OKane2022, ORegan2022 -- the same LG M50 cell as Chen2020 (would
@@ -133,10 +137,14 @@ class RunSpec:
 class DatasetConfig:
     """Full description of a dataset build; serialised into ``metadata.json``."""
 
-    parameter_sets: tuple[str, ...] = tuple(CELLS)
+    #: Default build: three recordings, one per C-rate on a single cell, all at
+    #: 25 C ambient and discharged from full. The recordings then differ in
+    #: load, duration and temperature rise while staying directly comparable.
+    #: A wider grid was redundant for the median-filter workload.
+    parameter_sets: tuple[str, ...] = ("Chen2020",)
     c_rates: tuple[float, ...] = (0.5, 1.0, 2.0)
-    ambient_c: tuple[float, ...] = (5.0, 25.0, 45.0)
-    profiles: tuple[str, ...] = PROFILES
+    ambient_c: tuple[float, ...] = (25.0,)
+    profiles: tuple[str, ...] = ("discharge",)
     samples_per_run: int = 60000
     model: str = "SPM"
     noise: NoiseConfig = field(default_factory=NoiseConfig)

@@ -451,17 +451,24 @@ def fig_run_gallery(ds: Dataset, runs: list[RunSpec], config: DatasetConfig, pat
         for i, ps in enumerate(sorted({r.parameter_set for r in runs}))
     }
     ambients = sorted({r.ambient_c for r in runs})
-    amb_cmap = plt.get_cmap("coolwarm")
-    amb_norm = Normalize(vmin=min(ambients), vmax=max(ambients))
+    # A single ambient temperature leaves nothing to colour by, so fall back to
+    # one flat colour rather than a meaningless gradient.
+    if len(ambients) > 1:
+        amb_cmap = plt.get_cmap("coolwarm")
+        amb_norm = Normalize(vmin=min(ambients), vmax=max(ambients))
+        point_colors = [amb_cmap(amb_norm(r.ambient_c)) for r in runs]
+    else:
+        point_colors = [PALETTE["sky"]] * len(runs)
     for i, r in enumerate(runs):
         rise = float(ds.clean[i, :, 3].max() - ds.clean[i, :, 3].min())
         ax.scatter(r.c_rate, rise, s=58, marker=markers.get(r.parameter_set, "o"), alpha=0.82,
-                   color=amb_cmap(amb_norm(r.ambient_c)), edgecolor="#333333", linewidth=0.6, zorder=3)
+                   color=point_colors[i], edgecolor="#333333", linewidth=0.6, zorder=3)
     ax.set_xticks(sorted({r.c_rate for r in runs}), [f"{c:g}" for c in sorted({r.c_rate for r in runs})])
     ax.set_xlabel("C-rate  [1/h]")
     ax.set_ylabel("Temperature rise  \u0394T  [K]")
-    bar = fig.colorbar(plt.cm.ScalarMappable(cmap=amb_cmap, norm=amb_norm), ax=ax, pad=0.015)
-    bar.set_label("Ambient  [\u00b0C]")
+    if len(ambients) > 1:
+        bar = fig.colorbar(plt.cm.ScalarMappable(cmap=amb_cmap, norm=amb_norm), ax=ax, pad=0.015)
+        bar.set_label("Ambient  [\u00b0C]")
     handles = [Line2D([], [], marker=m, ls="none", color="#666666", markersize=6, label=k)
                for k, m in markers.items()]
     ax.legend(handles=handles, title="Parameter set", loc="upper left")
@@ -476,9 +483,10 @@ def fig_run_gallery(ds: Dataset, runs: list[RunSpec], config: DatasetConfig, pat
     ax.set_xlabel("Run index  [sorted by duration]")
     ax.set_ylabel("Recording duration  [h]")
     ax.xaxis.set_major_locator(MaxNLocator(integer=True, nbins=10))
+    profile_colors = {"discharge": PALETTE["blue"], "cccv": PALETTE["vermillion"]}
     handles = [
-        Line2D([], [], color=PALETTE["blue"], lw=6, label="discharge"),
-        Line2D([], [], color=PALETTE["vermillion"], lw=6, label="cccv"),
+        Line2D([], [], color=profile_colors.get(p, PALETTE["grey"]), lw=6, label=p)
+        for p in sorted({r.profile for r in runs})
     ]
     ax.legend(handles=handles, title="Profile", loc="upper left")
     _panel(ax, "c", f"Duration spread (median {np.median(hours):.1f} h)")

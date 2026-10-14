@@ -10,49 +10,43 @@ seed `20251007`), measured from `data/artifacts/`.
 
 ### Runs by type
 
-54 runs in total, and every axis is evenly covered:
+3 recordings, one per C-rate, on a single cell at 25 °C, discharged from full:
 
-| Axis | Value | Runs |
-| --- | --- | --- |
-| Cell | LG M50 (`Chen2020`) | 18 |
-| | graphite/NMC532 pouch (`Mohtat2020`) | 18 |
-| | Enertech (`Ai2020`) | 18 |
-| C-rate | 0.5C | 18 |
-| | 1C | 18 |
-| | 2C | 18 |
-| Ambient temperature | 5 °C / 25 °C / 45 °C | 18 each |
-| Experiment | `discharge` | 27 |
-| | `cccv` | 27 |
+| Recording | C-rate | Current | Duration | Temperature rise |
+| --- | --- | --- | --- | --- |
+| `Chen2020_c0.5_T25_discharge` | 0.5C | 2.5 A | 2.27 h | 3.5 K |
+| `Chen2020_c1_T25_discharge` | 1C | 5.0 A | 1.25 h | 8.9 K |
+| `Chen2020_c2_T25_discharge` | 2C | 10.0 A | 0.74 h | 19.9 K |
 
-That is **27 unique cell × C-rate × temperature combinations, each simulated
-twice** — once as a discharge, once as a CC-CV charge. No combination is
-missing and none is duplicated.
+Holding the cell, the ambient temperature and the experiment fixed leaves the
+load as the only variable, so the three recordings are directly comparable and
+visibly different.
 
 ### Size
 
 | Quantity | Value |
 | --- | --- |
-| Runs (records) | 54 |
-| Samples per run | 60 000 |
+| Recordings | 3 |
+| Samples per recording | 60 000 |
 | Channels per sample | 4 — `time_s`, `current_A`, `voltage_V`, `temperature_K` |
-| Sample rows across all runs | 3 240 000 |
-| Scalar values in the tensor | 12 960 000 |
-| npz payload (array bytes) | 116 640 000 B = 111.2 MiB = 792 × 64 KiB blocks |
-| npz file on disk | 116 662 212 B |
-| CSV files | 55 (54 run files + 1 index) |
-| CSV total on disk | 271.3 MB |
-| Figures | 5 PNGs, 1.8 MiB |
+| Sample rows in total | 180 000 |
+| Scalar values in the tensor | 720 000 |
+| npz payload (array bytes) | 6 480 000 B = 6.2 MiB = 44 × 64 KiB blocks |
+| npz file on disk | 6 482 424 B |
+| CSV files | 4 (3 recording files + 1 index) |
+| CSV total on disk | 14.2 MiB |
+| Figures | 5 PNGs |
 
 ### Signal and corruption statistics
 
 | Quantity | Value |
 | --- | --- |
-| Run duration | 0.68 h – 3.64 h (median 1.56 h) |
-| Temperature rise across the 18 runs at 2C | 1.53 K – 25.87 K |
-| Corrupted samples — current | 48 244 (1.4890 %) |
-| Corrupted samples — voltage | 48 259 (1.4895 %) |
-| Corrupted samples — temperature | 48 260 (1.4895 %) |
-| Corrupted samples — total | 144 763 of 9 720 000 sensor cells (1.489 %) |
+| Recording duration | 0.74 h – 2.27 h (median 1.25 h) |
+| Temperature rise | 3.5 K – 19.9 K |
+| Corrupted samples — current | 2 679 (1.4883 %) |
+| Corrupted samples — voltage | 2 681 (1.4894 %) |
+| Corrupted samples — temperature | 2 680 (1.4889 %) |
+| Corrupted samples — total | 8 040 of 540 000 sensor cells (1.489 %) |
 
 ## [Unreleased] — 2026-10-07
 
@@ -79,6 +73,10 @@ missing and none is duplicated.
 
 ### Changed
 
+- **Default sweep reduced from 54 recordings to 3.** One cell at three C-rates
+  replaces the 3 cells × 3 C-rates × 3 ambient temperatures × 2 experiments
+  grid, which was redundant for the median-filter workload. Artefacts shrank
+  from 371 MiB to 22 MiB and the build from ≈ 50 s to ≈ 20 s.
 - **Both authors listed** in `data/pyproject.toml`, sourced from the git history
   and the GitHub API: [@Anmol-G-K](https://github.com/Anmol-G-K) and
   [@Sanjay5421](https://github.com/Sanjay5421), each with their GitHub no-reply
@@ -125,6 +123,10 @@ missing and none is duplicated.
   recovered from the mask.
 - **Figure 05(b)** — parameter-set markers were hardcoded and would break when
   the cell set changed; now derived from the runs present.
+- **Figure 05(b)/(c)** — the ambient-temperature colourbar drew a meaningless
+  23–27 °C gradient when a single ambient temperature was simulated, and the
+  duration panel legended a `cccv` profile that was not in the dataset. Both now
+  show only what the data actually contains.
 
 ### Removed
 
