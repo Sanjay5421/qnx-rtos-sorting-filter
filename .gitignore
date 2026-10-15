@@ -17,8 +17,11 @@ data/artifacts/dataset/
 # Local planning notes — working scratch, not part of the deliverable
 /milestones-draft.md
 
-# Build outputs of RT-MOMS/tests (host .exe and, later, target binaries)
+# Build outputs of RT-MOMS/tests. The .exe rule covers host builds; the bare
+# names would be produced by a target or Linux build with the same Makefile.
+/RT-MOMS/tests/*.exe
 /RT-MOMS/tests/test_sensor
-/RT-MOMS/tests/test_sensor.exe
+/RT-MOMS/tests/test_protocol
+/RT-MOMS/tests/test_block_loader
 /RT-MOMS/tests/sensor_demo
-/RT-MOMS/tests/sensor_demo.exe
+/RT-MOMS/tests/loader_demo

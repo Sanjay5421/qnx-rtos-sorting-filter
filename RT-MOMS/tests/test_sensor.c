@@ -22,6 +22,7 @@
  */
 
 #include "../app/sensor.h"
+#include "test_data.h"
 #include "test_util.h"
 
 #include <stdio.h>
@@ -45,8 +46,6 @@
 #define RAMP_LONG 10000
 #define PAYLOAD_BLOCK_SAMPLES 16384  /* 64 KiB of float32 */
 #define PAYLOAD_RECORD_SAMPLES 60000 /* one 60 000-sample recording */
-
-static char dataset_dir[512];
 
 /* ------------------------------------------------------------------------- */
 /* Helpers                                                                    */
@@ -99,58 +98,6 @@ static void make_ramp(float *dst, size_t count)
 
     for (i = 0; i < count; i++)
         dst[i] = (float)i / 2.0f;
-}
-
-static int join(char *out, size_t cap, const char *a, const char *b)
-{
-    size_t la = strlen(a);
-    size_t lb = strlen(b);
-
-    if (la + lb + 1 > cap)
-        return -1;
-    memcpy(out, a, la);
-    memcpy(out + la, b, lb);
-    out[la + lb] = '\0';
-    return 0;
-}
-
-/* "<dataset>/bin/channels/r1_voltage.bin" — the planar per-channel export. */
-static const char *voltage_path(void)
-{
-    static char path[600];
-
-    if (dataset_dir[0] == '\0' ||
-        join(path, sizeof(path), dataset_dir, "/bin/channels/r1_voltage.bin") != 0)
-        return NULL;
-    return path;
-}
-
-/* "<dataset>/bin/Chen2020_c1_T25_discharge.bin" — the interleaved sensor
- * record for the same recording (r1), 4 floats per sample. */
-static const char *interleaved_path(void)
-{
-    static char path[600];
-
-    if (dataset_dir[0] == '\0' ||
-        join(path, sizeof(path), dataset_dir,
-             "/bin/Chen2020_c1_T25_discharge.bin") != 0)
-        return NULL;
-    return path;
-}
-
-static int has_dataset(const char *dir)
-{
-    char  path[600];
-    FILE *fp;
-
-    if (dir == NULL ||
-        join(path, sizeof(path), dir, "/bin/channels/r1_voltage.bin") != 0)
-        return 0;
-    fp = fopen(path, "rb");
-    if (fp == NULL)
-        return 0;
-    fclose(fp);
-    return 1;
 }
 
 /* Monotonic milliseconds for the pacing test. */
@@ -632,13 +579,13 @@ static void test_real_layouts_agree(void)
     int             nb;
     int             k;
 
-    planar = sensor_open(voltage_path(), NULL);
+    planar = sensor_open(td_voltage_path(), NULL);
 
     sensor_config_default(&cfg);
     cfg.layout = SENSOR_LAYOUT_INTERLEAVED;
     cfg.stride = 4;
     cfg.offset = 1;    /* record = [time_s, voltage_V, current_A, temperature_K] */
-    strided = sensor_open(interleaved_path(), &cfg);
+    strided = sensor_open(td_interleaved_path(), &cfg);
 
     T_CHECK(planar != NULL);
     T_CHECK(strided != NULL);
@@ -687,7 +634,7 @@ static void test_real_block_partition(void)
     sensor_config_default(&cfg);
     cfg.frame_samples = 128;
 
-    s = sensor_open(voltage_path(), &cfg);
+    s = sensor_open(td_voltage_path(), &cfg);
     T_CHECK(s != NULL);
     if (s == NULL)
         return;
@@ -723,7 +670,7 @@ static void test_real_min_max(void)
     sensor_config_default(&cfg);
     cfg.frame_samples = 128;
 
-    s = sensor_open(voltage_path(), &cfg);
+    s = sensor_open(td_voltage_path(), &cfg);
     T_CHECK(s != NULL);
     if (s == NULL)
         return;
@@ -764,7 +711,7 @@ static void test_real_channel_offsets(void)
         cfg.offset = offsets[i];
         cfg.frame_samples = 100;
 
-        s = sensor_open(interleaved_path(), &cfg);
+        s = sensor_open(td_interleaved_path(), &cfg);
         T_CHECK(s != NULL);
         if (s == NULL)
             continue;
@@ -790,44 +737,12 @@ static void test_real_channel_offsets(void)
 
 int main(int argc, char **argv)
 {
-    const char *dir = NULL;
-    const char *from_env;
-
-    if (argc > 1)
-        dir = argv[1];
-    else {
-        from_env = getenv("BATTERY_DATASET_DIR");
-        if (from_env != NULL)
-            dir = from_env;
-    }
-
-    if (!has_dataset(dir)) {
-        static const char *candidates[3] = {
-            "../../data/artifacts/dataset",
-            "../data/artifacts/dataset",
-            "data/artifacts/dataset"
-        };
-        int i;
-
-        dir = NULL;
-        for (i = 0; i < 3; i++) {
-            if (has_dataset(candidates[i])) {
-                dir = candidates[i];
-                break;
-            }
-        }
-    }
-
-    if (dir != NULL && strlen(dir) < sizeof(dataset_dir)) {
-        memcpy(dataset_dir, dir, strlen(dir) + 1);
-    } else {
-        dataset_dir[0] = '\0';
-    }
+    int have_data = td_find_dataset(argc, argv);
 
     printf("virtual sensor tests\n");
     printf("  dataset: %s\n\n",
-           (dataset_dir[0] != '\0') ? dataset_dir
-                                    : "(not found -- payload tests will be skipped)");
+           have_data ? td_dir
+                     : "(not found -- payload tests will be skipped)");
 
     T_RUN(test_config_defaults);
     T_RUN(test_open_rejects_bad_input);
@@ -841,7 +756,7 @@ int main(int argc, char **argv)
     T_RUN(test_block_read);
     T_RUN(test_paced_reads);
 
-    if (dataset_dir[0] != '\0') {
+    if (have_data) {
         T_RUN(test_real_layouts_agree);
         T_RUN(test_real_block_partition);
         T_RUN(test_real_min_max);

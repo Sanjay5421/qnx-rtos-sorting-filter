@@ -92,7 +92,18 @@ static int t_skipped = 0;
         }                                                                    \
     } while (0)
 
-static uint32_t t_bits(float f)
+/*
+ * GCC's "may be unused" marker. A test binary that never compares floats bit
+ * for bit would otherwise trip -Wunused-function for t_bits below. qcc is GCC,
+ * so this is available on the host and on the target alike.
+ */
+#if defined(__GNUC__)
+#  define T_MAYBE_UNUSED __attribute__((unused))
+#else
+#  define T_MAYBE_UNUSED
+#endif
+
+static T_MAYBE_UNUSED uint32_t t_bits(float f)
 {
     uint32_t bits;
 
