@@ -1,0 +1,15 @@
+bcm2711 options:
+
+Notes for board-specific options:
+-----------------------------------
+BS Options: All options are separated by colons
+
+'bmstr_base'    : ram base address from busmaster view
+
+
+Example:
+-----------------------------------
+For raspberry pi4:
+
+#SD
+devb-sdmmc-bcm2711 cam pnp,verbose blk rw,cache=2M dos umask=077 mem name=below1G sdio addr=0xfe340000,irq=158,bs=bmstr_base=0xc0000000 disk name=sd

@@ -1,0 +1,19 @@
+BCM2711 I2C manager
+
+%C [options]
+
+Options:
+-p addr         I2C base address(Default: 0)
+-i irq          I2C interrupt (Default: 149)
+-c clock        Default to 5000(100KHz)
+-v              Set verbose(Default: 2)
+-s slave addr   Slave address(only 7-bit addr supported. Default: 0)
+
+
+Generic options:
+--b bus_speed       Default bus speed. (Default: 100000)
+--u unit            Unit number. Number to append to device name
+                    prefix (/dev/i2c). (Default: 0)
+
+Example:
+%C  -p0xfe804000 --b100000 --u1

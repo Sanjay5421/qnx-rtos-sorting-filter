@@ -1,0 +1,3 @@
+define PINFO
+PINFO DESCRIPTION = BCM2711 SPI Device Driver
+endef

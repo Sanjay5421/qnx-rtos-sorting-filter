@@ -1,0 +1,9 @@
+# The imported Raspberry Pi 4 BSP (RT-MOMS) must round-trip byte-exactly.
+# mkifs embeds the shell-script bodies from images/rpi4.build straight into the
+# boot image, so a CRLF checkout (core.autocrlf=true on Windows) would put \r
+# into the scripts that run on the target and break the boot.
+RT-MOMS/** -text
+
+# Keep this file itself conversion-free, so its patterns survive a Windows
+# checkout intact (a CRLF-terminated pattern is not guaranteed to match).
+/.gitattributes -text

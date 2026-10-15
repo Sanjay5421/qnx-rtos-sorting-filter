@@ -1,0 +1,3 @@
+define PINFO
+PINFO DESCRIPTION=BCM2711 I2C Driver
+endef

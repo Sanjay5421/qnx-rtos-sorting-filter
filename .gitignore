@@ -12,3 +12,4 @@ pi_data/
 # NOTE: the figures under data/artifacts/figures/ are deliberately NOT ignored:
 # they are small and are embedded in README.md.
 data/artifacts/dataset/
+/.metadata/

@@ -1,0 +1,6 @@
+
+Driver-specific options:
+(To be set in the config file by parameter 'bs' under section 'bus'.)
+
+    rpanic=num      Defines read panic threshold (default: 48)
+    tpanic=num      Defines write panic threshold (default: 16)

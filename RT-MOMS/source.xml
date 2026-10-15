@@ -1,0 +1,22 @@
+<!-- Unless otherwise specified, values/attributes are free-form strings -->
+    <!-- type is currently either BSP or SourceOnly -->
+<sourcePackage type="BSP" id="hw.raspberrypi-bcm2711-rpi4">
+    <title>Raspberry Pi BCM2711 R-PI4</title>
+    <release>0.2.0</release>
+    <maturity>Development Build</maturity>
+    <license>QDL and Apache II</license>
+    <startup>startup-bcm2711-rpi4</startup>
+    <requires>package: com.qnx.${baselineId}.target.microkernel.core (>= 2.0.2)</requires>
+    <requires>package: com.qnx.${baselineId}.target.pci.hw.bcm2711</requires>
+    <requires>package: com.qnx.${baselineId}.target.net.openSSH (>= 0.1.0)</requires>
+    <requires>package: com.qnx.${baselineId}.target.usb.hcd.xhci.bcm2711</requires>
+    <description> This board support package (BSP) is for the Raspberry Pi 4 board. This BSP contains prebuilt binaries and buildfiles to boot your board with the QNX RTOS. In addition, this BSP provides source code for various drivers that you can build. For documentation to use this BSP, download the user's guide.</description>
+    <vendor>BlackBerry Limited</vendor>
+    <qnxTargetVersion>SDP8.0</qnxTargetVersion>
+    <qnxTargetCPU variant="aarch64le">AARCH64</qnxTargetCPU>
+    <property key="f.swtype" value="I"/>
+    <!-- type is currently only import, will be extended in the future. -->
+    <bsp type="import">
+        <import id="raspberrypi-bcm2711-rpi4">images/rpi4.build</import>
+    </bsp>
+</sourcePackage>
