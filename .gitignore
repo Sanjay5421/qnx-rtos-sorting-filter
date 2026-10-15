@@ -13,3 +13,12 @@ pi_data/
 # they are small and are embedded in README.md.
 data/artifacts/dataset/
 /.metadata/
+
+# Local planning notes — working scratch, not part of the deliverable
+/milestones-draft.md
+
+# Build outputs of RT-MOMS/tests (host .exe and, later, target binaries)
+/RT-MOMS/tests/test_sensor
+/RT-MOMS/tests/test_sensor.exe
+/RT-MOMS/tests/sensor_demo
+/RT-MOMS/tests/sensor_demo.exe
