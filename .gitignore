@@ -5,6 +5,9 @@ __pycache__/
 # Virtual environments (uv creates .venv/.gitignore, this is belt and braces)
 .venv/
 
+# Data stuff
+pi_data/
+
 # Generated payload — large (~370 MiB: .npz tensor + 55 CSVs).
 # NOTE: the figures under data/artifacts/figures/ are deliberately NOT ignored:
 # they are small and are embedded in README.md.

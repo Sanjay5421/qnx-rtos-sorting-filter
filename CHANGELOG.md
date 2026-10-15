@@ -70,6 +70,17 @@ visibly different.
   outlier counts.
 - **`CHANGELOG.md`** (this file).
 - Reference rolling-median implementation used only for the recovery figures.
+- **Pi export script** (`export_for_pi.py`) — writes the noisy `time`,
+  `current`, `voltage` and `temperature` channels of each recording as raw
+  little-endian float32 `.bin` files (`pi_data/`, 12 files of 240 000 B each)
+  plus a `manifest.txt`, so the QNX client can read them without NumPy. Only
+  the corrupted readings are exported; the clean signal and the outlier mask
+  stay on the host as the answer key.
+- **Stage-1 virtual sensor loader** (`qnx_project/sensor_load.c`) — loads one
+  raw float32 channel file, then prints the sample count, the number of
+  64 KiB blocks, the min / max and the first samples. Every libc return value
+  is checked. First step towards the client of the sorting / median-filter
+  service.
 
 ### Changed
 
@@ -96,6 +107,7 @@ visibly different.
   artefacts, `__pycache__` and virtual environments.
 - Run duration and thermal range now vary far more across the sweep because the
   three cells have different capacities and thermal behaviour.
+- **`.gitignore`** now also ignores the generated `pi_data/` export.
 
 ### Fixed
 
