@@ -164,6 +164,30 @@
 
 
 ################################################################################################
+## Project programs (app/) — built by `make install` into install/aarch64le/bin,
+## found here by name. Missing binaries are an error, unlike the payload below.
+################################################################################################
+/bin/test_protocol=test_protocol
+/bin/test_sensor=test_sensor
+/bin/test_block_loader=test_block_loader
+/bin/loader_demo=loader_demo
+/bin/sensor_demo=sensor_demo
+
+
+################################################################################################
+## Payload for the on-target tests. Generated and git-ignored, so these entries
+## are optional: without them the image simply has no data, and the payload
+## tests report themselves as skipped instead of failing.
+################################################################################################
+[uid=0 gid=0 type=dir dperms=0755] /data
+[uid=0 gid=0 type=dir dperms=0755] /data/bin
+[uid=0 gid=0 type=dir dperms=0755] /data/bin/channels
+
+[+optional search=../install/data uid=0 gid=0 perms=0644] /data/bin/channels/r1_voltage.bin=r1_voltage.bin
+[+optional search=../install/data uid=0 gid=0 perms=0644] /data/bin/Chen2020_c1_T25_discharge.bin=Chen2020_c1_T25_discharge.bin
+
+
+################################################################################################
 ## Serial drivers
 ################################################################################################
 /sbin/devc-serminiuart=devc-serminiuart

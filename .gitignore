@@ -31,3 +31,11 @@ data/artifacts/dataset/
 /RT-MOMS/install/
 /RT-MOMS/src/**/*.o
 /RT-MOMS/images/*.sym
+
+# Binaries the app Makefile builds in place for the target
+/RT-MOMS/app/test_protocol
+/RT-MOMS/app/test_sensor
+/RT-MOMS/app/test_block_loader
+/RT-MOMS/app/sensor_demo
+/RT-MOMS/app/loader_demo
+/RT-MOMS/app/*.o
