@@ -297,9 +297,15 @@ one — is doing the work:
 
 1 → 4 workers is **3.01×** on the board (9.110 ms → 3.029 ms for the whole
 60 000-sample recording), and one 64 KiB block is 163.84 s of the 100 Hz signal,
-so the sort finishes 163.84 s of samples in 0.757 ms — about 216 000× real time.
-The host's own numbers move between runs (0.74–1.06 ms per block at one worker,
-0.25–0.44 ms at four); the board's were taken in one session, one run each.
+so the sort finishes 163.84 s of samples in 0.757 ms — about 216 000 times real
+time. The host's own numbers move between runs (0.74–1.06 ms per block at one
+worker, 0.25–0.44 ms at four); the board's were taken in one session, one run
+each.
+
+A second board session put the interleaved record through the same command and
+got 0.744 ms per block (76.91 MiB/s) with the same medians and ranges — the planar
+figure again, to within run-to-run noise, which is the cross-check that the two
+on-disk layouts reach the same signal.
 
 The checksums are FNV-1a over 16384 float32 values each, computed from the file
 bytes, so matching the host means the whole path — file I/O, the channel offset
@@ -307,20 +313,17 @@ and stride, float handling and the checksum — is bit-identical on aarch64. The
 `cksum` values are POSIX CRCs of the payload files and owe nothing to our code:
 they show the data inside the image is the original file.
 
-Confirmed on hardware: `test_protocol` (82 / 0 failed / 0 skipped), both `cksum`
-values, `sensor_demo`, `loader_demo` in both layouts, and the sort itself.
-`test_mergesort` passed all eleven of its non-payload tests on the board, and
-`pipeline_demo` produced medians, ranges, plan lines and order verdicts identical
-to the host at 1, 2 and 4 workers — the sweep above is that run.
+Confirmed on hardware: `test_protocol` (82 / 0 failed / 0 skipped),
+`test_block_loader /data` (116 / 0 / 0), `test_mergesort /data` (578 / 0 / 0, the
+payload tests included), both `cksum` values, `sensor_demo`, `loader_demo` in both
+layouts, and `pipeline_demo` at 1, 2 and 4 workers on both layouts — medians,
+ranges, plan lines and order verdicts identical to the host, and the planar and
+interleaved routes producing the same four checksums.
 
-Still to capture on the board: `test_mergesort /data`, which is the run that adds
-the two payload tests and the `578 checks, 0 failed, 0 skipped` line (without the
-argument the summary reads `535 checks, 0 failed, 1 skipped`); `test_sensor
-/data` and `test_block_loader /data` past their last test — `test_block_loader`
-has not run on the board at all; and the interleaved `loader_demo` and
-`pipeline_demo` runs. Two of this session's runs were cut short by the serial
-session closing mid-stream (`SERIAL session closed`), so those lines are missing
-output rather than failures — everything up to the cut matched the host.
+Still to capture on the board: `test_sensor /data` past `test_real_block_partition`
+— the two tests after it and the `642 checks, 0 failed, 0 skipped` line. An earlier
+run of it was cut short when the serial session closed mid-stream, so that is
+missing output rather than a failure: everything up to the cut matched the host.
 
 ### Three lines that need reading correctly
 

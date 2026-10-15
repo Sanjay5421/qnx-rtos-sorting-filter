@@ -115,13 +115,14 @@ the parallel merge sort, milestone 2 — added.
   module implements and why, and every command with its expected output, host and
   target, marked verified or planned.
 - **Verified on the board**: `test_protocol` (82 checks, 0 failed, 0 skipped),
-  both `cksum` values of the payload inside the image, `loader_demo` in both
-  layouts, `sensor_demo`, and the sort — `test_mergesort` passing its eleven
-  non-payload tests, and `pipeline_demo` reporting the host's medians, ranges,
-  plan lines and order verdicts at 1, 2 and 4 workers. One 64 KiB block takes
-  0.757 ms on the board with four workers against 2.278 ms with one (3.01×),
-  which is 163.84 s of 100 Hz signal sorted per 0.757 ms. Still to capture: the
-  payload suites on the board.
+  `test_block_loader /data` (116 / 0 / 0) and `test_mergesort /data` (578 / 0 / 0,
+  the payload tests included), both `cksum` values of the payload inside the
+  image, `sensor_demo`, `loader_demo` in both layouts, and `pipeline_demo` at 1, 2
+  and 4 workers on both layouts — medians, ranges, plan lines, checksums and order
+  verdicts all identical to the host. One 64 KiB block takes 0.757 ms on the board
+  with four workers against 2.278 ms with one (3.01×), which is 163.84 s of 100 Hz
+  signal sorted per 0.757 ms. The only line still to capture there is
+  `test_sensor /data`, whose earlier run the serial session cut short.
 
 ### Changed
 
