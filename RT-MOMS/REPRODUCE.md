@@ -151,6 +151,10 @@ Confirm the result is an AArch64 binary:
 
 ## 8. Run on the target **[prerequisites verified; the copy-and-run is yours to do]**
 
+> **The project uses the UART console only.** This section is a network route
+> that also works, but it is not the one used here: with section 9's wiring the
+> programs and their data are inside the image, so there is nothing to copy.
+
 Everything the board needs is already in the image, checked off-board with
 `dumpifs`:
 
@@ -228,17 +232,35 @@ Two things to know before running it inside the repository:
 `Templates_build_sdp800/template.mk` turns out not to be needed — the `-include`
 is optional, so `$(MKIFSFLAGS)` simply expands to nothing.
 
-**Deploying an image that contains our own code** still needs two wiring steps,
-which the successful build above does not provide:
+**The project programs are wired in** (`7002f6f`): `app/Makefile` builds them
+for aarch64le and installs them into `install/aarch64le/bin`, the top-level
+`make install` runs it, and `images/rpi4.build` places them in `/bin` with the
+payload in `/data`. One `make` therefore produces an image that contains them:
 
-1. a QNX-convention `Makefile` under `RT-MOMS/app/` (or a `src/app/` directory)
-   so `make install` copies the binaries into `install/aarch64le/...`;
-2. entries in `RT-MOMS/images/rpi4.build` for those binaries, and a launch line
-   in its `[+script] startup-script` block if they should start at boot.
+| In the image | Size |
+| --- | --- |
+| `/bin/test_protocol`, `/bin/test_sensor`, `/bin/test_block_loader` | 24 KB, 32 KB, 28 KB |
+| `/bin/sensor_demo`, `/bin/loader_demo` | 20 KB each |
+| `/data/bin/channels/r1_voltage.bin` | 240 000 B |
+| `/data/bin/Chen2020_c1_T25_discharge.bin` | 960 000 B |
 
-Then the same `make` produces an `ifs-rpi4.bin` containing them, to be copied to
-the SD card's FAT partition together with the firmware files and a `config.txt`
-containing `kernel=ifs-rpi4.bin`.
+The image grew from 36 197 292 B to 37 524 788 B. Copy it to the SD card's FAT
+partition with the firmware files and a `config.txt` containing
+`kernel=ifs-rpi4.bin`.
+
+Then, on the target console and with nothing to mount:
+
+```sh
+test_protocol                 # expected:  82 checks, 0 failed, 0 skipped
+test_sensor /data             # expected: 642 checks, 0 failed, 0 skipped
+test_block_loader /data       # expected: 116 checks, 0 failed, 0 skipped
+```
+
+`0 failed` **and** `0 skipped` together mean the programs ran *and* found their
+payload. A non-zero `skipped` means the image carries no data in `/data` — a
+packaging problem, not a code failure. The payload entries in `rpi4.build` are
+optional for exactly that reason, so a checkout without the generated data still
+builds.
 
 ---
 
