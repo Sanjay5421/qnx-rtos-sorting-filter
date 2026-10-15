@@ -111,8 +111,8 @@ the parallel merge sort, milestone 2 — added.
   `install/aarch64le/bin`, the top-level `make` runs it, and `images/rpi4.build`
   places them in `/bin` with the payload in `/data`. The image is 37 610 936 B
   and carries seven programs; `dumpifs` lists them back out of the built image.
-- **`IMPLEMENTATION.md`** (repository root) and **`RT-MOMS/REPRODUCE.md`** — what
-  each stage implements and why, in pipeline order with diagrams, and every
+- **`IMPLEMENTATION.md`** and **`REPRODUCE.md`** (both at the repository root) —
+  what each stage implements and why, in pipeline order with diagrams, and every
   command with its expected output, host and target, marked verified or planned.
 - **Verified on the board**: `test_protocol` (82 checks, 0 failed, 0 skipped),
   `test_block_loader /data` (116 / 0 / 0) and `test_mergesort /data` (578 / 0 / 0,

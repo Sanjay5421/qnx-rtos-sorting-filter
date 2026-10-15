@@ -3,9 +3,8 @@
 How the service is implemented, stage by stage, in the order a sample actually
 travels: recording on disk → sensor → block loader → message definition → client
 → server → merge sort → median filter → pulse and result → boot image. The
-commands that run all of this are in
-[RT-MOMS/REPRODUCE.md](RT-MOMS/REPRODUCE.md); this file explains what they
-exercise and why each stage is shaped the way it is.
+commands that run all of this are in [REPRODUCE.md](REPRODUCE.md); this file
+explains what they exercise and why each stage is shaped the way it is.
 
 Paths below are relative to the repository root: `app/`, `tests/` and `images/`
 all live under `RT-MOMS/`, and the generated datasets are under `data/`.
@@ -460,7 +459,7 @@ flowchart LR
   they are really inside.
 - The console is the interface: `/dev/ser1` at 115200 8N1, a `ksh` prompt, and
   `/tmp` for the scratch files the tests write. The board's own runs are recorded
-  in `RT-MOMS/REPRODUCE.md` section 8, including which lines still have to be captured.
+  in `REPRODUCE.md` section 8, including which lines still have to be captured.
 
 ---
 
