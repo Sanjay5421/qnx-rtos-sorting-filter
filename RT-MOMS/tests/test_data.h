@@ -19,6 +19,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "test_util.h"      /* for T_MAYBE_UNUSED */
+
 /*: Directory of the generated payload, or "" when it was not found. */
 static char td_dir[512];
 
@@ -83,8 +85,9 @@ static int td_find_dataset(int argc, char **argv)
     return 1;
 }
 
-/*: Recording r1 (1C) as a planar per-channel file: one float32 per sample. */
-static const char *td_voltage_path(void)
+/*: Recording r1 (1C) as a planar per-channel file: one float32 per sample.
+ *  A test binary may need only one of the two layouts, so both are marked. */
+static T_MAYBE_UNUSED const char *td_voltage_path(void)
 {
     static char path[600];
 
@@ -95,7 +98,7 @@ static const char *td_voltage_path(void)
 }
 
 /*: The same recording as the interleaved sensor record: 4 floats per sample. */
-static const char *td_interleaved_path(void)
+static T_MAYBE_UNUSED const char *td_interleaved_path(void)
 {
     static char path[600];
 

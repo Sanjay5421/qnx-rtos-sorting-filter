@@ -20,9 +20,14 @@ INSTALL_DATA = ../install/data
 DATA         = ../../data/artifacts/dataset
 SRCDIR       = ../tests
 
-SOURCES  = sensor.c protocol.c block_loader.c
-HEADERS  = sensor.h protocol.h block_loader.h
-PROGRAMS = test_protocol test_sensor test_block_loader sensor_demo loader_demo
+SOURCES  = sensor.c protocol.c block_loader.c mergesort.c
+HEADERS  = sensor.h protocol.h block_loader.h mergesort.h
+PROGRAMS = test_protocol test_sensor test_block_loader test_mergesort \
+           sensor_demo loader_demo pipeline_demo
+
+# mergesort.c uses POSIX threads, which the QNX C library provides without an
+# extra library or flag; the host build needs the compiler split described in
+# ../tests/Makefile.
 
 # The payload the on-target tests read. It is generated and git-ignored, so a
 # missing copy is a warning here and an optional entry in the build file: the

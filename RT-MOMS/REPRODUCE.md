@@ -40,7 +40,15 @@ Expected tail of each block, and exit status 0 only if nothing failed:
 === test_sensor            642 checks, 0 failed, 0 skipped
 === test_protocol           82 checks, 0 failed, 0 skipped
 === test_block_loader      116 checks, 0 failed, 0 skipped
+=== test_mergesort         578 checks, 0 failed, 0 skipped
 ```
+
+`test_mergesort` and `pipeline_demo` link `../app/mergesort.c`, which needs
+`<pthread.h>`. MinGW.org's gcc on this host has no such header, so the Makefile
+probes for a thread-capable compiler and picks the MSYS2 one
+(`C:/msys64/mingw64/bin/gcc.exe`); on QNX and Linux the probe answers `$(CC)`
+itself and nothing needs setting. `mingw32-make check THREADCC=…` overrides the
+choice.
 
 ---
 
@@ -52,7 +60,7 @@ mingw32-make all
 ```
 
 Produces `test_sensor.exe test_protocol.exe test_block_loader.exe
-sensor_demo.exe loader_demo.exe`.
+test_mergesort.exe sensor_demo.exe loader_demo.exe pipeline_demo.exe`.
 
 ---
 
@@ -63,6 +71,7 @@ cd RT-MOMS/tests
 ./test_sensor.exe        ../../data/artifacts/dataset
 ./test_protocol.exe      # needs no payload
 ./test_block_loader.exe  ../../data/artifacts/dataset
+./test_mergesort.exe     ../../data/artifacts/dataset
 ```
 
 The payload argument is optional. Without it, the tests look in
@@ -92,10 +101,29 @@ with it missing you should see the payload tests skipped and still exit 0.
 cd RT-MOMS/tests
 mingw32-make demo          # the 64 KiB block stream + server-side validation
 mingw32-make demo-sensor   # live sample-by-sample trace at 10 Hz
+mingw32-make demo-pipeline # sort the recording in its 64 KiB blocks
 ```
 
 Expected from `make demo`: four blocks, sequences 0–3, samples
 16384/16384/16384/10848, `accepted : 4 of 4`.
+
+`make demo-pipeline` sorts each block with four workers and prints per block the
+min, the median, the max, the sort time and the throughput. On this host, over
+`r1_voltage.bin` (60 000 samples):
+
+```
+  blocks        : 4 (3 full 64 KiB, 1 short)
+  samples sorted: 60000
+  sort time     : 1.753 ms total, 0.438 ms per block
+  throughput    : 130.55 MiB/s, 34223135 samples/s
+  last block    : 4 partitions, 2 merge phases, 7 tasks, 4 workers
+  order checked : 4 of 4 blocks sorted
+```
+
+The medians fall block by block (3.96, 3.64, 3.38, 2.97 V) because the recording
+is a discharge and the sort makes that monotonic; `order checked` and the
+`ok` column are the demo re-verifying the sort on real payload. The times are
+this machine's, not the Pi's.
 
 ---
 
@@ -108,6 +136,16 @@ gcc -std=c99 -Wall -Wextra -O2 -g -o test_protocol test_protocol.c \
 ./test_protocol
 ```
 
+The two that sort add `../app/mergesort.c` to that list and need a compiler with
+`<pthread.h>` — on this host MinGW.org's `gcc` is not one, so:
+
+```sh
+C:/msys64/mingw64/bin/gcc.exe -std=c99 -Wall -Wextra -O2 -g \
+    -o test_mergesort test_mergesort.c ../app/sensor.c ../app/protocol.c \
+    ../app/block_loader.c ../app/mergesort.c
+./test_mergesort
+```
+
 ---
 
 ## 7. Cross-compile for the Raspberry Pi, `aarch64le` **[verified]**
@@ -118,13 +156,19 @@ Git Bash / MSYS2:
 export QNX_HOST="P:/qnx/qnx800/host/win64/x86_64"
 export QNX_TARGET="P:/qnx/qnx800/target/qnx"
 QCC="$QNX_HOST/usr/bin/qcc.exe"
+SRC="../app/sensor.c ../app/protocol.c ../app/block_loader.c ../app/mergesort.c"
 
 cd RT-MOMS/tests
-for f in test_sensor test_protocol test_block_loader loader_demo sensor_demo; do
-    "$QCC" -Vgcc_ntoaarch64le -std=c99 -D_QNX_SOURCE -Wall -Wextra -O2 -o "$f.arm" \
-        $f.c ../app/sensor.c ../app/protocol.c ../app/block_loader.c
+for f in test_sensor test_protocol test_block_loader test_mergesort \
+         loader_demo sensor_demo pipeline_demo; do
+    "$QCC" -Vgcc_ntoaarch64le -std=c99 -D_QNX_SOURCE -Wall -Wextra -O2 \
+        -o "$f.arm" "$f.c" $SRC
 done
 ```
+
+All seven compile with no warnings. `../app/mergesort.c` needs POSIX threads,
+which QNX's C library provides — the three binaries that call it link against
+`libc.so.6` alone, the same as the others (`-d` shows no extra `NEEDED` entry).
 
 `cmd.exe`:
 
@@ -159,7 +203,7 @@ programs and their payload are inside the image.
 
 | File | Notes |
 | --- | --- |
-| `ifs-rpi4.bin` | **37 524 788 B**, SHA-256 `a5b2ea3bca7e22277d1dcee59d717039b8d03dbad68a4f28cd19407efd6df28e`. The stock image is 34 489 984 B and contains none of the programs below. |
+| `ifs-rpi4.bin` | **37 610 936 B**, SHA-256 `b71677d514c186e2fa055def8c8e227280d45b7e3aa994f6f1c5239c6f4b54d2`. The stock image is 34 489 984 B and contains none of the programs below. |
 | `config.txt` | the BSP guide's `[rpi4]` block; `kernel=ifs-rpi4.bin` is what boots this image |
 | firmware | `start4.elf`, `fixup4.dat`, `bcm2711-rpi-4-b.dtb`, `overlays/` |
 
@@ -201,12 +245,14 @@ cd /tmp                     # the test suites write their temporary files here
 test_protocol               # the protocol layer
 test_sensor /data           # the virtual sensor
 test_block_loader /data     # the block loader
+test_mergesort /data        # the parallel merge sort
 
 cksum /data/bin/channels/r1_voltage.bin
 cksum /data/bin/Chen2020_c1_T25_discharge.bin
 loader_demo /data/bin/channels/r1_voltage.bin planar voltage 100
 loader_demo /data/bin/Chen2020_c1_T25_discharge.bin interleaved voltage 100
 sensor_demo /data/bin/channels/r1_voltage.bin 10 0 1 20
+pipeline_demo /data/bin/channels/r1_voltage.bin planar voltage 100 4
 ```
 
 `/data` is the dataset directory. The two payload files are at
@@ -220,10 +266,17 @@ sensor_demo /data/bin/channels/r1_voltage.bin 10 0 1 20
 | `test_protocol` | `82 checks, 0 failed, 0 skipped` | same |
 | `test_sensor /data` | `642 checks, 0 failed, 0 skipped` | same |
 | `test_block_loader /data` | `116 checks, 0 failed, 0 skipped` | same |
+| `test_mergesort /data` | `578 checks, 0 failed, 0 skipped` | same |
 | `cksum` of `r1_voltage.bin` | `2261229843 240000` | same |
 | `cksum` of the interleaved record | `530587124 960000` | same |
 | `loader_demo`, both layouts | `0xe90d24d2`, `0xc98cd3b2`, `0x14c728bb`, `0x362ab592`; `3 full + 10848`; `accepted : 4 of 4` | same |
 | `sensor_demo` | values `4.19853` … `4.20414`; `min / max / mean 2.59783 / 4.27399 / 3.53497` | same |
+| `pipeline_demo`, 4 workers | medians `3.9618 3.6416 3.3841 2.9735`; `4 partitions, 2 merge phases, 7 tasks`; `4 of 4 blocks sorted` | same medians and plan; the µs and MiB/s are per machine |
+
+The sort columns to compare across machines are the *values*, not the times:
+`is_sorted()` runs on the aarch64 output here, `test_mergesort` compares against
+`qsort()` on both, and the plan is fixed by `n` and the thread count, so
+`4 partitions, 2 merge phases, 7 tasks` must read the same on the Pi.
 
 The checksums are FNV-1a over 16384 float32 values each, computed from the file
 bytes, so matching the host means the whole path — file I/O, the channel offset
@@ -233,9 +286,11 @@ they show the data inside the image is the original file.
 
 Confirmed on hardware so far: `test_protocol` (82 / 0 failed / 0 skipped), both
 `cksum` values, both `loader_demo` runs and `sensor_demo`. Still to confirm on
-the board: the two payload suites — the first `test_sensor` run reached
-`test_real_block_partition` and its final count was not captured, and
-`test_block_loader` had not been run at all.
+the board: the three payload suites — the first `test_sensor` run reached
+`test_real_block_partition` and its final count was not captured,
+`test_block_loader` had not been run at all, and neither `test_mergesort` nor
+`pipeline_demo` existed when the board was last booted. Everything in this
+section was run on the host, and the image now on the card carries all of it.
 
 ### Three lines that need reading correctly
 
@@ -251,7 +306,7 @@ the board: the two payload suites — the first `test_sensor` run reached
 ### If a command is not found
 
 Then the image on the card is not the one from section 9 — check the
-37 524 788-byte size first, before looking at anything else.
+37 610 936-byte size first, before looking at anything else.
 
 ---
 
@@ -298,14 +353,17 @@ payload in `/data`. One `make` therefore produces an image that contains them:
 
 | In the image | Size |
 | --- | --- |
-| `/bin/test_protocol`, `/bin/test_sensor`, `/bin/test_block_loader` | 24 KB, 32 KB, 28 KB |
-| `/bin/sensor_demo`, `/bin/loader_demo` | 20 KB each |
+| `/bin/test_protocol`, `/bin/test_sensor`, `/bin/test_block_loader` | 33 KB, 46 KB, 38 KB |
+| `/bin/test_mergesort` | 42 KB |
+| `/bin/sensor_demo`, `/bin/loader_demo`, `/bin/pipeline_demo` | 29 KB each |
 | `/data/bin/channels/r1_voltage.bin` | 240 000 B |
 | `/data/bin/Chen2020_c1_T25_discharge.bin` | 960 000 B |
 
-The image grew from 36 197 292 B to 37 524 788 B. Copy it to the SD card's FAT
-partition with the firmware files and a `config.txt` containing
-`kernel=ifs-rpi4.bin`.
+The image grew from 36 197 292 B (the BSP alone) to 37 610 936 B; the sort and
+its two binaries account for 86 148 B of that. `dumpifs images/ifs-rpi4.bin`
+lists them back out of the built image, which is the check that they really are
+inside it. Copy it to the SD card's FAT partition with the firmware files and a
+`config.txt` containing `kernel=ifs-rpi4.bin`.
 
 Then, on the target console and with nothing to mount:
 
@@ -313,6 +371,7 @@ Then, on the target console and with nothing to mount:
 test_protocol                 # expected:  82 checks, 0 failed, 0 skipped
 test_sensor /data             # expected: 642 checks, 0 failed, 0 skipped
 test_block_loader /data       # expected: 116 checks, 0 failed, 0 skipped
+test_mergesort /data          # expected: 578 checks, 0 failed, 0 skipped
 ```
 
 `0 failed` **and** `0 skipped` together mean the programs ran *and* found their

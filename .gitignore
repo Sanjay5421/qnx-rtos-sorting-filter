@@ -18,13 +18,19 @@ data/artifacts/dataset/
 /milestones-draft.md
 
 # Build outputs of RT-MOMS/tests. The .exe rule covers host builds; the bare
-# names would be produced by a target or Linux build with the same Makefile.
+# names would be produced by a target or Linux build with the same Makefile, and
+# .arm by the cross-compile step in REPRODUCE.md section 7.
 /RT-MOMS/tests/*.exe
+/RT-MOMS/tests/*.arm
 /RT-MOMS/tests/test_sensor
 /RT-MOMS/tests/test_protocol
 /RT-MOMS/tests/test_block_loader
+/RT-MOMS/tests/test_mergesort
 /RT-MOMS/tests/sensor_demo
 /RT-MOMS/tests/loader_demo
+/RT-MOMS/tests/pipeline_demo
+# Compiler probe the tests Makefile writes to pick a thread-capable compiler
+/RT-MOMS/tests/.threadprobe.c
 
 # BSP build outputs: a `make` in RT-MOMS/ populates install/, leaves objects
 # beside the sources, can emit symbol files, and overwrites the committed image.
@@ -39,6 +45,8 @@ data/artifacts/dataset/
 /RT-MOMS/app/test_protocol
 /RT-MOMS/app/test_sensor
 /RT-MOMS/app/test_block_loader
+/RT-MOMS/app/test_mergesort
 /RT-MOMS/app/sensor_demo
 /RT-MOMS/app/loader_demo
+/RT-MOMS/app/pipeline_demo
 /RT-MOMS/app/*.o

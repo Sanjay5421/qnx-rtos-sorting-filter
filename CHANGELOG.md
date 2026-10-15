@@ -48,6 +48,92 @@ visibly different.
 | Corrupted samples — temperature | 2 680 (1.4889 %) |
 | Corrupted samples — total | 8 040 of 540 000 sensor cells (1.489 %) |
 
+## [Unreleased] — 2026-10-15
+
+The QNX side of the project (`RT-MOMS/`) landed in this window without an entry
+here, so it is recorded in full below, followed by what the last piece of it —
+the parallel merge sort, milestone 2 — added.
+
+### Added — the service sources (`RT-MOMS/app/`)
+
+- **`protocol.h`/`protocol.c` — the common message definition**, the interface
+  both sides compile against, and the "message definition in a common header
+  file" the prerequisites ask for: a 16384-sample float32 block (exactly 64 KiB,
+  so "payload at least 64 KB" needs no padding), a block descriptor (sequence,
+  first sample, sample count, rate, channel, FNV-1a checksum, min/max), the
+  two-part IOV submit `{header, block}`, the ack, the completion pulse (code 16)
+  behind which the client fetches its result, and the result itself carrying the
+  median and the memory-offset descriptor. Message types are asserted at compile
+  time to stay clear of QNX's system message range, and the pulse code clear of
+  the kernel's reserved codes.
+- **`sensor.h`/`sensor.c` — the virtual sensor**: replays a recording like a
+  device, a sample or a frame at a time, from either on-disk layout through one
+  code path (`offset`/`stride`, so planar is `{0, 1}` and interleaved `{k, 4}`),
+  with bounded read-ahead, exact per-sample timestamps and optional pacing.
+- **`block_loader.h`/`block_loader.c` — recording → 64 KiB blocks plus
+  descriptors**, and the one place that knows the interleaved record's field
+  order (`time_s, voltage_V, current_A, temperature_K`) is *not* the protocol's
+  channel order. A short final block is zero-padded, so its bytes — and its
+  checksum — are reproducible.
+
+### Added — parallel merge sort (milestone 2)
+
+- **`mergesort.h`/`mergesort.c`** — the sort the server runs on each block, on a
+  pool of POSIX worker threads: phase 0 sorts one partition per worker, then each
+  merge phase halves the number of runs until one covers the array. The phase
+  boundary is a real barrier — one mutex plus a work-ready and a phase-done
+  condition variable — so no phase begins before the runs it reads exist, and
+  nothing is ordered by a sleep. One `n`-float scratch buffer is ping-ponged with
+  the caller's array; the merge is stable, so equal values keep their order and
+  the output does not depend on the thread count; the sort is in place; and
+  `ms_stats()` reports the partitions, phases and worker tasks that actually ran.
+  Inputs below 4096 values take a single-threaded path, and a second concurrent
+  sort on the same pool is refused rather than allowed to corrupt the shared
+  phase state.
+- **`tests/test_mergesort.c`** — 13 tests, 578 checks: bit-identical output for
+  1–8 threads; every size from 0 to 64; the sizes around the 4096 threshold and
+  the partition boundaries; all-equal, two-value, presorted, reverse-sorted and
+  sawtooth input; `±0.0`, denormals, `FLT_MIN`/`FLT_MAX`; and, over the real
+  payload, no NaN anywhere plus every block matching `qsort()`'s answer and the
+  descriptor's own min/max while leaving the block itself untouched.
+- **`tests/pipeline_demo.c`** — the compute half of the service without the IPC:
+  a block stream in, the median, the range, the sort time and the throughput out.
+
+### Added — the host suite and the boot image
+
+- **`RT-MOMS/tests/`** — the whole host-side suite: `test_sensor.c` (15 tests,
+  642 checks), `test_protocol.c` (9, 82), `test_block_loader.c` (8, 116),
+  `test_mergesort.c` (13, 578), with `sensor_demo.c`, `loader_demo.c` and
+  `pipeline_demo.c` alongside. `mingw32-make check` builds and runs all four
+  suites — 1418 checks — and `demo-pipeline` sorts the payload in its 64 KiB
+  blocks, four workers deep.
+- **BSP wiring**: `app/Makefile` cross-builds the programs for `aarch64le` into
+  `install/aarch64le/bin`, the top-level `make` runs it, and `images/rpi4.build`
+  places them in `/bin` with the payload in `/data`. The image is 37 610 936 B
+  and carries seven programs; `dumpifs` lists them back out of the built image.
+- **`RT-MOMS/IMPLEMENTATION.md`** and **`RT-MOMS/REPRODUCE.md`** — what each
+  module implements and why, and every command with its expected output, host and
+  target, marked verified or planned.
+- **Verified on the board**: `test_protocol` (82 checks, 0 failed, 0 skipped),
+  both `cksum` values of the payload inside the image, both `loader_demo` runs
+  and `sensor_demo` matched the host. The three payload suites and the sort run
+  are the next board session.
+
+### Changed
+
+- **`tests/test_data.h`** now includes `test_util.h` and marks both payload path
+  helpers `T_MAYBE_UNUSED`, so a suite that needs only one of the two layouts
+  still builds warning-free.
+- **`tests/Makefile`** grew a `THREADCC` probe: the binaries that link
+  `mergesort.c` need `<pthread.h>`, which MinGW.org's gcc on this host does not
+  ship at all, so the compiler is chosen by compiling and linking a probe instead
+  of being assumed. On QNX and Linux the probe answers `$(CC)` itself, and
+  `THREADCC=…` overrides the choice.
+- **`.gitignore`** covers the new host and target binaries and the probe's
+  scratch file.
+- **`README.md`** — the repository layout now names `RT-MOMS/` and
+  `qnx_project/`.
+
 ## [Unreleased] — 2026-10-07
 
 ### Added
@@ -85,7 +171,7 @@ visibly different.
   plus a `manifest.txt`, so the QNX client can read them without NumPy. Only
   the corrupted readings are exported; the clean signal and the outlier mask
   stay on the host as the answer key.
-- **Stage-1 virtual sensor loader** (`qnx_project/sensor_load.c`) — loads one
+- **Stage-1 virtual sensor loader** (`qnx_project/loader.c`) — loads one
   raw float32 channel file, then prints the sample count, the number of
   64 KiB blocks, the min / max and the first samples. Every libc return value
   is checked. First step towards the client of the sorting / median-filter
