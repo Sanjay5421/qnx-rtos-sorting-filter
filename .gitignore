@@ -29,8 +29,11 @@ data/artifacts/dataset/
 # BSP build outputs: a `make` in RT-MOMS/ populates install/, leaves objects
 # beside the sources, can emit symbol files, and overwrites the committed image.
 /RT-MOMS/install/
-/RT-MOMS/src/**/*.o
 /RT-MOMS/images/*.sym
+# Object directories: a make leaves generated dependency files, usage info,
+# maps and the linked drivers under src/**/aarch64/<variant>/, beside the
+# tracked Makefiles that produce them. Nothing there is source.
+/RT-MOMS/src/**/aarch64/**
 
 # Binaries the app Makefile builds in place for the target
 /RT-MOMS/app/test_protocol

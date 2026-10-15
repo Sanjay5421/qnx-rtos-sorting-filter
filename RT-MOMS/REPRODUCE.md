@@ -149,50 +149,109 @@ Confirm the result is an AArch64 binary:
 
 ---
 
-## 8. Run on the target **[prerequisites verified; the copy-and-run is yours to do]**
+## 8. Run on the target, over the UART console **[verified on hardware]**
 
-> **The project uses the UART console only.** This section is a network route
-> that also works, but it is not the one used here: with section 9's wiring the
-> programs and their data are inside the image, so there is nothing to copy.
+The board boots the image from section 9 and is driven from the serial console
+at 115200 8N1. Nothing is copied to the board and nothing is mounted: the
+programs and their payload are inside the image.
 
-Everything the board needs is already in the image, checked off-board with
-`dumpifs`:
+### On the SD card's FAT partition
 
-| Check | Result |
+| File | Notes |
 | --- | --- |
-| A cross-compiled binary needs | `libc.so.6`, `libgcc_s.so.1` |
-| Present in `ifs-rpi4.bin` | both, plus `proc/boot/ldqnx-64.so.2` |
-| Way in | the image starts `dhcpcd` and `sshd`; console is the mini-UART at 115200 8N1 |
-| Accounts | `root` and `qnxuser` in `/etc/passwd`, passwords in `/etc/shadow` |
+| `ifs-rpi4.bin` | **37 524 788 B**, SHA-256 `a5b2ea3bca7e22277d1dcee59d717039b8d03dbad68a4f28cd19407efd6df28e`. The stock image is 34 489 984 B and contains none of the programs below. |
+| `config.txt` | the BSP guide's `[rpi4]` block; `kernel=ifs-rpi4.bin` is what boots this image |
+| firmware | `start4.elf`, `fixup4.dat`, `bcm2711-rpi-4-b.dtb`, `overlays/` |
 
-```sh
-# 1. cross-compile (section 7). On the Pi console, find the address:
-ifconfig
+### A good boot looks like this
 
-# 2. copy the binary over — from Windows, password qnxuser
-scp test_protocol qnxuser@<pi-ip>:/home/qnxuser/
-
-# 3. run it on the console
-cd /home/qnxuser && ./test_protocol
 ```
 
-Expected: `82 checks, 0 failed, 0 skipped` — the same suite that passes on the
-host, now on real aarch64 QNX against the target libc. `test_protocol` needs no
-payload, which makes it the cheapest possible first run. For the payload suites,
-copy `test_block_loader` and `test_sensor` together with `r1_voltage.bin`
-(240 000 B) and `Chen2020_c1_T25_discharge.bin` (960 000 B) from
-`data/artifacts/dataset/`.
+Loading IFS...done
+...
+Welcome to QNX 8.0.0 on RaspberryPi4B !
 
-**Use `qnxuser`, not `root`.** The image ships OpenSSH's stock `sshd_config`
-with every directive commented out, so the effective default is
-`PermitRootLogin prohibit-password` and a root *password* login is refused. To
-use root anyway, note that `/etc/ssh` is a symlink into `/dev/shmem`, so the
-config is editable on a running board: uncomment `PermitRootLogin yes` and
-restart `sshd`.
+Starting wdtkick ...
+Starting I2C driver ...
+Starting PCI Server ...
+Starting serial driver (/dev/ser1)
+Starting SPI master driver ...
+Starting SDMMC driver (/dev/sd0)
+Starting USB xHCI controller in the host mode (/dev/usb/*)...
+Starting devf-ram filesystem ...
+Starting networking ...
+Starting DHCP client ...
+Starting SSH daemon ...
+Starting devc-pty manager ...
+Starting qconn daemon ...
+Starting shell ...
+#
+```
 
-`/home/qnxuser`, `/tmp` and `/dev/shmem` are all RAM, so anything copied there
-is gone at reboot. The route that survives a reboot is putting the binaries
-inside the image — that is section 9's wiring step.
+The `cpu0` … `cpu3` blocks above the banner are `procnto-smp-instr` bringing up
+all four Cortex-A72 cores. The shell prompt is the thing that says the boot
+succeeded.
+
+### The sequence, once you have the prompt
+
+```sh
+uname -a                    # QNX 8.0.0 ... RaspberryPi4B aarch64le
+cd /tmp                     # the test suites write their temporary files here
+
+test_protocol               # the protocol layer
+test_sensor /data           # the virtual sensor
+test_block_loader /data     # the block loader
+
+cksum /data/bin/channels/r1_voltage.bin
+cksum /data/bin/Chen2020_c1_T25_discharge.bin
+loader_demo /data/bin/channels/r1_voltage.bin planar voltage 100
+loader_demo /data/bin/Chen2020_c1_T25_discharge.bin interleaved voltage 100
+sensor_demo /data/bin/channels/r1_voltage.bin 10 0 1 20
+```
+
+`/data` is the dataset directory. The two payload files are at
+`/data/bin/channels/r1_voltage.bin` and
+`/data/bin/Chen2020_c1_T25_discharge.bin`.
+
+### What each must print, against the host
+
+| Command | Target | Host |
+| --- | --- | --- |
+| `test_protocol` | `82 checks, 0 failed, 0 skipped` | same |
+| `test_sensor /data` | `642 checks, 0 failed, 0 skipped` | same |
+| `test_block_loader /data` | `116 checks, 0 failed, 0 skipped` | same |
+| `cksum` of `r1_voltage.bin` | `2261229843 240000` | same |
+| `cksum` of the interleaved record | `530587124 960000` | same |
+| `loader_demo`, both layouts | `0xe90d24d2`, `0xc98cd3b2`, `0x14c728bb`, `0x362ab592`; `3 full + 10848`; `accepted : 4 of 4` | same |
+| `sensor_demo` | values `4.19853` … `4.20414`; `min / max / mean 2.59783 / 4.27399 / 3.53497` | same |
+
+The checksums are FNV-1a over 16384 float32 values each, computed from the file
+bytes, so matching the host means the whole path — file I/O, the channel offset
+and stride, float handling and the checksum — is bit-identical on aarch64. The
+`cksum` values are POSIX CRCs of the payload files and owe nothing to our code:
+they show the data inside the image is the original file.
+
+Confirmed on hardware so far: `test_protocol` (82 / 0 failed / 0 skipped), both
+`cksum` values, both `loader_demo` runs and `sensor_demo`. Still to confirm on
+the board: the two payload suites — the first `test_sensor` run reached
+`test_real_block_partition` and its final count was not captured, and
+`test_block_loader` had not been run at all.
+
+### Three lines that need reading correctly
+
+- **`sensor: …` during `test_sensor`** is expected output. That test feeds bad
+  input on purpose — NULL path, missing file, a 3-byte file, a 6-float "record" —
+  and every diagnostic is immediately followed by `ok`.
+- **`/usr/libexec/sshd-auth does not exist or is not executable`** at boot comes
+  from the BSP's own `ssh-server.sh`, so ssh is unusable in this image. That
+  costs nothing here because the console is the interface, and it is not caused
+  by anything under `app/`.
+- **`Path=0 - bcm2711 … SDMMC`** is the SD card enumerating; expected.
+
+### If a command is not found
+
+Then the image on the card is not the one from section 9 — check the
+37 524 788-byte size first, before looking at anything else.
 
 ---
 
