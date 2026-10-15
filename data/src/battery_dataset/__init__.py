@@ -2,7 +2,7 @@
 
 Pipeline: sweep the PyBaMM run grid -> solve clean recording blocks -> inject
 sensor noise and impulsive outliers -> persist ``.npz`` + ``metadata.json`` +
-one CSV per run -> render diagnostic figures.
+one CSV per run + raw ``.bin`` per run -> render diagnostic figures.
 
 Run as a module::
 
@@ -19,9 +19,10 @@ from pathlib import Path
 
 import numpy as np
 
+from .binio import write_channel_bins, write_dataset_bins
 from .config import CELLS, CHANNELS, DatasetConfig, NoiseConfig, RunSpec
-from .csvio import total_bytes, write_dataset_csvs
-from .dataset import Dataset
+from .csvio import write_dataset_csvs
+from .dataset import Dataset, total_bytes
 from .dataset import save as save_dataset
 from .noise import inject_noise
 from .plot import render_all
@@ -91,6 +92,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--seed", type=int, default=None, help="outlier RNG seed")
     parser.add_argument("--no-plots", action="store_true", help="skip figure rendering")
     parser.add_argument("--no-csv", action="store_true", help="skip the CSV rendering")
+    parser.add_argument("--no-bin", action="store_true", help="skip the raw binary export")
     parser.add_argument("--quick", action="store_true", help="3 runs x 4k samples smoke build")
     args = parser.parse_args(argv)
 
@@ -115,6 +117,13 @@ def main(argv: list[str] | None = None) -> int:
         csv_paths, index_path = write_dataset_csvs(dataset, config)
         print(f"Wrote {len(csv_paths)} run CSVs + {index_path.name} "
               f"({_mib(total_bytes(csv_paths) + index_path.stat().st_size)})")
+
+    if not args.no_bin:
+        bin_paths = write_dataset_bins(dataset, config)
+        channel_paths, manifest_path = write_channel_bins(dataset, config)
+        total = total_bytes(bin_paths) + total_bytes(channel_paths) + manifest_path.stat().st_size
+        print(f"Wrote {len(bin_paths)} interleaved + {len(channel_paths)} per-channel binary files "
+              f"({_mib(total)})")
 
     if not args.no_plots:
         figures = render_all(dataset, runs, config)

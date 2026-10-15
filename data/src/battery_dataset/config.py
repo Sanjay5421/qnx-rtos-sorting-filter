@@ -21,6 +21,16 @@ CHANNELS: tuple[str, ...] = (TIME_CHANNEL,) + SENSOR_CHANNELS
 #: Payload block size used by the service transport (float32 samples).
 BLOCK_BYTES = 64 * 1024
 
+#: Raw binary export layout: a headerless, fixed-stride record per sample, in
+#: this order, stored as little-endian float32. A reader reaches sample ``n``
+#: by seeking to ``n * BIN_RECORD_BYTES``.
+BIN_FIELDS: tuple[str, ...] = ("time_s", "voltage_V", "current_A", "temperature_K")
+BIN_ITEM_BYTES = 4
+BIN_RECORD_BYTES: int = BIN_ITEM_BYTES * len(BIN_FIELDS)
+
+#: Per-channel binary file names, one per dataset channel, in channel order.
+CHANNEL_NAMES: tuple[str, ...] = tuple(name.split("_")[0] for name in CHANNELS)
+
 DEFAULT_OUTPUT_DIR = Path(__file__).resolve().parents[2] / "artifacts"
 
 
@@ -172,6 +182,12 @@ class DatasetConfig:
 
     def csv_dir(self) -> Path:
         return self.dataset_dir() / "csv"
+
+    def bin_dir(self) -> Path:
+        return self.dataset_dir() / "bin"
+
+    def channel_bin_dir(self) -> Path:
+        return self.bin_dir() / "channels"
 
     def figure_dir(self) -> Path:
         return self.figures_dir or (self.output_dir / "figures")

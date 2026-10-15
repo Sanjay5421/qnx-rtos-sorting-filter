@@ -63,6 +63,15 @@ visibly different.
   median filter can be scored rather than eyeballed.
 - **CSV rendering** — one self-contained CSV per run plus a `csv_index.csv`
   manifest, in addition to the `.npz` tensor.
+- **Raw binary export in two layouts** — for every recording, an *interleaved*
+  pair (`<run_id>.bin` sensor record, `<run_id>.truth.bin` clean ground truth;
+  headerless little-endian float32 in `time_s, voltage_V, current_A,
+  temperature_K` order, 16 bytes per sample) and a *per-channel* set
+  (`bin/channels/r<index>_<channel>.bin`, one flat float32 run per channel plus
+  `manifest.txt`). The per-channel layout is the one `qnx_project/loader.c`
+  reads: min/max over such a file is meaningful, whereas over an interleaved
+  record it mixes all four channels. Both layouts are declared in
+  `metadata.json`.
 - **Five diagnostic figures** (`01_signal_overview`, `02_noise_injection`,
   `03_median_filter_recovery`, `04_noise_statistics`, `05_run_gallery`).
 - **`metadata.json` manifest** recording the build configuration, the cell
@@ -142,6 +151,8 @@ visibly different.
 
 ### Removed
 
+- `export_for_pi.py` — its per-channel export now runs inside the generator
+  (`binio.py`), emitting the same `r<index>_<channel>.bin` files plus a manifest.
 - `data/README.md` and `data/.gitignore` (consolidated at the repository root).
 - `OKane2022` from the default sweep (duplicate of the `Chen2020` cell).
 - Dead `LogNorm` import and an unused accumulator in the plotting module.

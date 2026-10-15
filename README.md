@@ -37,7 +37,7 @@ setup. The build takes about 20 s.
 | `--samples N` | samples per recording |
 | `--seed N` | outlier RNG seed |
 | `--output-dir DIR` | write artefacts somewhere else |
-| `--no-csv`, `--no-plots` | skip the CSV rendering / the figures |
+| `--no-csv`, `--no-bin`, `--no-plots` | skip the CSV rendering / the binary export / the figures |
 
 The generator is split into small modules (`config`, `simulate`, `noise`,
 `dataset`, `csvio`, `plot`) rather than one long script. It stays a package
@@ -121,7 +121,9 @@ data/artifacts/
 │   ├── battery_sensor_dataset.npz     # clean, noisy, outlier_mask, duration_s, run_ids
 │   ├── metadata.json                  # build config, cell identity, shapes, per-run stats
 │   ├── csv_index.csv                  # manifest of the 3 recording CSVs
-│   └── csv/<run_id>.csv               # 3 files, one per recording
+│   ├── csv/<run_id>.csv               # 3 files, one per recording
+│   ├── bin/<run_id>[.truth].bin       # 6 interleaved files
+│   └── bin/channels/r<idx>_<ch>.bin   # 12 per-channel files + manifest.txt
 └── figures/                           # 5 PNGs, shown below
 ```
 
@@ -137,6 +139,30 @@ outlier_current, outlier_voltage, outlier_temperature           ← 1 where a sp
 
 The `.npz` is the primary artefact (compact, exact); the CSVs reproduce it
 column for column.
+
+**Binary files — 18 in total**, in two layouts. Both are headerless,
+little-endian float32.
+
+*Per channel* (12 files + a manifest): `bin/channels/r<index>_<channel>.bin`,
+one flat run of 60 000 samples per channel — `time`, `current`, `voltage`,
+`temperature` — at 240 000 bytes each. `manifest.txt` maps each `r<index>`
+prefix to its recording id. This is the layout `qnx_project/loader.c` reads: a
+whole file is one signal, so a min/max over it is meaningful.
+
+*Interleaved* (6 files): `<run_id>.bin` is the sensor record (AWGN plus
+impulsive outliers, what the service consumes) and `<run_id>.truth.bin` the
+clean ground truth. Fixed 16-byte stride, so a reader seeks straight to sample
+*n* at `n * 16`:
+
+```
+record = [time_s, voltage_V, current_A, temperature_K]     # 4 x float32 LE = 16 bytes
+```
+
+960 000 bytes each, readable straight into `struct { float t, v, i, temp; }`.
+Note the two layouts order their values differently: the interleaved record is
+time/voltage/current/temperature, while the per-channel files carry the dataset's
+own time/current/voltage/temperature order in their filenames. Both layouts are
+declared in `metadata.json` under `binary_export`.
 
 Two caveats worth stating plainly. The `outlier_*` flags are the **injected
 ground truth**, not the output of a detector — no outlier detection is

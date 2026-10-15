@@ -13,7 +13,16 @@ from pathlib import Path
 
 import numpy as np
 
-from .config import BLOCK_BYTES, CHANNELS, DatasetConfig, RunSpec
+from .config import (
+    BIN_FIELDS,
+    BIN_ITEM_BYTES,
+    BIN_RECORD_BYTES,
+    BLOCK_BYTES,
+    CHANNEL_NAMES,
+    CHANNELS,
+    DatasetConfig,
+    RunSpec,
+)
 
 DATASET_FILENAME = "battery_sensor_dataset.npz"
 METADATA_FILENAME = "metadata.json"
@@ -45,6 +54,11 @@ class Dataset:
     def block_count(self) -> int:
         """Number of 64 KiB transport blocks the noisy payload spans."""
         return int(np.ceil(self.noisy.nbytes / BLOCK_BYTES))
+
+
+def total_bytes(paths: list[Path]) -> int:
+    """Total size of a set of written artefacts."""
+    return int(sum(p.stat().st_size for p in paths))
 
 
 def save(
@@ -79,6 +93,31 @@ def save(
         "dtype": str(dataset.clean.dtype),
         "payload_bytes": dataset.n_bytes,
         "transport_blocks_64kib": dataset.block_count,
+        "binary_export": {
+            "dtype": f"float{BIN_ITEM_BYTES * 8} little-endian",
+            "interleaved": {
+                "directory": "bin",
+                "fields": list(BIN_FIELDS),
+                "bytes_per_sample": BIN_RECORD_BYTES,
+                "samples_per_file": int(dataset.shape[1]),
+                "bytes_per_file": int(dataset.shape[1] * BIN_RECORD_BYTES),
+                "files_per_recording": 2,
+                "suffixes": {
+                    ".bin": "sensor record (AWGN + impulsive outliers)",
+                    ".truth.bin": "clean ground truth",
+                },
+            },
+            "per_channel": {
+                "directory": "bin/channels",
+                "naming": "r<recording_index>_<channel>.bin",
+                "channels": list(CHANNEL_NAMES),
+                "samples_per_file": int(dataset.shape[1]),
+                "bytes_per_file": int(dataset.shape[1] * BIN_ITEM_BYTES),
+                "files_per_recording": len(CHANNEL_NAMES),
+                "manifest": "bin/channels/manifest.txt",
+                "variant": "sensor record (AWGN + impulsive outliers)",
+            },
+        },
         "runs": [
             {
                 "run_id": spec.run_id,

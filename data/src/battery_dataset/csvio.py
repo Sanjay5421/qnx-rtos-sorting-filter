@@ -13,7 +13,7 @@ from pathlib import Path
 import numpy as np
 
 from .config import CHANNELS, SENSOR_CHANNELS, DatasetConfig
-from .dataset import Dataset
+from .dataset import Dataset, total_bytes
 
 #: ``sample_index`` then, for every channel, clean / noisy / corruption flag.
 RUN_CSV_HEADER: tuple[str, ...] = (
@@ -76,7 +76,3 @@ def write_dataset_csvs(
     index_path = config.dataset_dir() / "csv_index.csv"
     index_path.write_text("\n".join(index_rows) + "\n", encoding="utf-8")
     return paths, index_path
-
-
-def total_bytes(paths: list[Path]) -> int:
-    return int(sum(p.stat().st_size for p in paths))
