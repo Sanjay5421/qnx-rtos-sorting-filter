@@ -1,7 +1,7 @@
 # Reproduce
 
 Every command needed to build this project's QNX-side code and run its tests.
-Commands only — the explanation is in [IMPLEMENTATION.md](IMPLEMENTATION.md).
+Commands only — the explanation is in [../IMPLEMENTATION.md](../IMPLEMENTATION.md).
 
 Markers: **[verified]** = run on this machine and produced the stated result.
 **[planned]** = not run yet.

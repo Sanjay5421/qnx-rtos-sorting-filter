@@ -13,7 +13,9 @@ the injection mask a median filter can be scored against.
 | --- | --- |
 | `README.md` | this file |
 | `CHANGELOG.md` | what changed, and why |
-| `RT-MOMS/` | the QNX side: the service sources in `app/`, the host tests and tools in `tests/`, the board support package with the boot image in `images/`. Start at [`RT-MOMS/IMPLEMENTATION.md`](RT-MOMS/IMPLEMENTATION.md) |
+| `RT-MOMS/` | the QNX side: the service sources in `app/`, the host tests and tools in `tests/`, the board support package with the boot image in `images/` |
+| `IMPLEMENTATION.md` | how each stage of the service works, in pipeline order, with diagrams |
+| `RT-MOMS/REPRODUCE.md` | every command to build and run it, host and target |
 | `data/` | PyBaMM generator for the synthetic client payload (`src/battery_dataset/`) |
 | `data/artifacts/dataset/` | generated payload — `.npz`, manifest, CSV (git-ignored, ≈ 20 MiB) |
 | `data/artifacts/figures/` | generated diagnostic figures (committed; shown below) |
