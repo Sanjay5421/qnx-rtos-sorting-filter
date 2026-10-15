@@ -248,7 +248,10 @@ ordering bug, lost value, duplicated value or half-merged phase can survive.
 | Payload bytes as blocks | 262 144 B (4 × 65 536) |
 | Sample bytes | 240 000 B |
 | Sort plan for one 64 KiB block, 4 workers | 4 partitions, 2 merge phases, 7 worker tasks |
-| Block sort on this host, 4 workers | 0.44 ms per 64 KiB block, ≈ 130 MiB/s; 1.75 ms for the whole 60 000-sample recording |
+| Block sort on this host, 4 workers | 0.25–0.44 ms per 64 KiB block, 130–230 MiB/s (the figure moves between runs) |
+| Block sort on the Raspberry Pi 4, 4 workers | 0.757 ms per 64 KiB block, 75.55 MiB/s, 21.6 M samples/s |
+| Thread scaling on the Pi 4 | 2.278 ms → 1.253 ms → 0.757 ms per block at 1, 2, 4 workers: 3.01× |
+| Real-time headroom at 100 Hz | one 64 KiB block is 163.84 s of signal and is sorted in 0.757 ms on the board |
 | Cross-compile | 7/7 binaries, ELF64 AArch64, no warnings |
 | Boot image carrying the programs | 37 610 936 B, SHA-256 `b71677d5…4b54d2` |
 

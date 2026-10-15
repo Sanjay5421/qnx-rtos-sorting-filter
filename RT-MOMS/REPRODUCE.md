@@ -259,6 +259,11 @@ pipeline_demo /data/bin/channels/r1_voltage.bin planar voltage 100 4
 `/data/bin/channels/r1_voltage.bin` and
 `/data/bin/Chen2020_c1_T25_discharge.bin`.
 
+Pass it explicitly on the target: the relative fallbacks the payload tests use
+on the host do not resolve from `/tmp`, so `test_mergesort` without `/data` runs
+its eleven unit tests and skips the two payload ones — visible as `535 checks, 0
+failed, 1 skipped` instead of `578 checks, 0 failed, 0 skipped`.
+
 ### What each must print, against the host
 
 | Command | Target | Host |
@@ -271,12 +276,30 @@ pipeline_demo /data/bin/channels/r1_voltage.bin planar voltage 100 4
 | `cksum` of the interleaved record | `530587124 960000` | same |
 | `loader_demo`, both layouts | `0xe90d24d2`, `0xc98cd3b2`, `0x14c728bb`, `0x362ab592`; `3 full + 10848`; `accepted : 4 of 4` | same |
 | `sensor_demo` | values `4.19853` … `4.20414`; `min / max / mean 2.59783 / 4.27399 / 3.53497` | same |
-| `pipeline_demo`, 4 workers | medians `3.9618 3.6416 3.3841 2.9735`; `4 partitions, 2 merge phases, 7 tasks`; `4 of 4 blocks sorted` | same medians and plan; the µs and MiB/s are per machine |
+| `pipeline_demo`, 4 workers | medians `3.9618 3.6416 3.3841 2.9735`; `4 partitions, 2 merge phases, 7 tasks`; `4 of 4 blocks sorted`; **0.757 ms per block, 75.55 MiB/s** | same medians, ranges, plan and order; 0.25–0.44 ms per block, 130–230 MiB/s |
 
 The sort columns to compare across machines are the *values*, not the times:
 `is_sorted()` runs on the aarch64 output here, `test_mergesort` compares against
 `qsort()` on both, and the plan is fixed by `n` and the thread count, so
 `4 partitions, 2 merge phases, 7 tasks` must read the same on the Pi.
+
+### The thread sweep, measured on the board
+
+Same file, the worker count as the last argument. The plan line changes shape
+with it, which is the proof that the parallel path — not just a faster serial
+one — is doing the work:
+
+| Workers | Plan the run reports | Per 64 KiB block | Throughput | Task plan |
+| --- | --- | --- | --- | --- |
+| 1 | `1 partitions, 0 merge phases, 1 tasks` | 2.278 ms | 25.12 MiB/s | one partition, nothing to merge |
+| 2 | `2 partitions, 1 merge phases, 3 tasks` | 1.253 ms | 45.66 MiB/s | 2 + 1 |
+| 4 | `4 partitions, 2 merge phases, 7 tasks` | 0.757 ms | 75.55 MiB/s | 4 + 2 + 1 |
+
+1 → 4 workers is **3.01×** on the board (9.110 ms → 3.029 ms for the whole
+60 000-sample recording), and one 64 KiB block is 163.84 s of the 100 Hz signal,
+so the sort finishes 163.84 s of samples in 0.757 ms — about 216 000× real time.
+The host's own numbers move between runs (0.74–1.06 ms per block at one worker,
+0.25–0.44 ms at four); the board's were taken in one session, one run each.
 
 The checksums are FNV-1a over 16384 float32 values each, computed from the file
 bytes, so matching the host means the whole path — file I/O, the channel offset
@@ -284,13 +307,20 @@ and stride, float handling and the checksum — is bit-identical on aarch64. The
 `cksum` values are POSIX CRCs of the payload files and owe nothing to our code:
 they show the data inside the image is the original file.
 
-Confirmed on hardware so far: `test_protocol` (82 / 0 failed / 0 skipped), both
-`cksum` values, both `loader_demo` runs and `sensor_demo`. Still to confirm on
-the board: the three payload suites — the first `test_sensor` run reached
-`test_real_block_partition` and its final count was not captured,
-`test_block_loader` had not been run at all, and neither `test_mergesort` nor
-`pipeline_demo` existed when the board was last booted. Everything in this
-section was run on the host, and the image now on the card carries all of it.
+Confirmed on hardware: `test_protocol` (82 / 0 failed / 0 skipped), both `cksum`
+values, `sensor_demo`, `loader_demo` in both layouts, and the sort itself.
+`test_mergesort` passed all eleven of its non-payload tests on the board, and
+`pipeline_demo` produced medians, ranges, plan lines and order verdicts identical
+to the host at 1, 2 and 4 workers — the sweep above is that run.
+
+Still to capture on the board: `test_mergesort /data`, which is the run that adds
+the two payload tests and the `578 checks, 0 failed, 0 skipped` line (without the
+argument the summary reads `535 checks, 0 failed, 1 skipped`); `test_sensor
+/data` and `test_block_loader /data` past their last test — `test_block_loader`
+has not run on the board at all; and the interleaved `loader_demo` and
+`pipeline_demo` runs. Two of this session's runs were cut short by the serial
+session closing mid-stream (`SERIAL session closed`), so those lines are missing
+output rather than failures — everything up to the cut matched the host.
 
 ### Three lines that need reading correctly
 
