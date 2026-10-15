@@ -25,3 +25,9 @@ data/artifacts/dataset/
 /RT-MOMS/tests/test_block_loader
 /RT-MOMS/tests/sensor_demo
 /RT-MOMS/tests/loader_demo
+
+# BSP build outputs: a `make` in RT-MOMS/ populates install/, leaves objects
+# beside the sources, can emit symbol files, and overwrites the committed image.
+/RT-MOMS/install/
+/RT-MOMS/src/**/*.o
+/RT-MOMS/images/*.sym

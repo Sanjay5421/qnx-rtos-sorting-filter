@@ -149,37 +149,58 @@ Confirm the result is an AArch64 binary:
 
 ---
 
-## 8. Run on the target **[planned]**
+## 8. Run on the target **[prerequisites verified; the copy-and-run is yours to do]**
 
-The stock image boots to a shell on the serial console at 115200 8N1
-(mini-UART). To get a cross-compiled binary onto the board without rebuilding
-the image, the image runs `dhcpcd` and `sshd`, so copy it over the network:
+Everything the board needs is already in the image, checked off-board with
+`dumpifs`:
+
+| Check | Result |
+| --- | --- |
+| A cross-compiled binary needs | `libc.so.6`, `libgcc_s.so.1` |
+| Present in `ifs-rpi4.bin` | both, plus `proc/boot/ldqnx-64.so.2` |
+| Way in | the image starts `dhcpcd` and `sshd`; console is the mini-UART at 115200 8N1 |
+| Accounts | `root` and `qnxuser` in `/etc/passwd`, passwords in `/etc/shadow` |
 
 ```sh
-scp test_block_loader.arm root@<pi-ip>:/dev/shmem/
+# 1. cross-compile (section 7). On the Pi console, find the address:
+ifconfig
+
+# 2. copy the binary over — from Windows, password qnxuser
+scp test_protocol qnxuser@<pi-ip>:/home/qnxuser/
+
+# 3. run it on the console
+cd /home/qnxuser && ./test_protocol
 ```
 
-then on the Pi console:
+Expected: `82 checks, 0 failed, 0 skipped` — the same suite that passes on the
+host, now on real aarch64 QNX against the target libc. `test_protocol` needs no
+payload, which makes it the cheapest possible first run. For the payload suites,
+copy `test_block_loader` and `test_sensor` together with `r1_voltage.bin`
+(240 000 B) and `Chen2020_c1_T25_discharge.bin` (960 000 B) from
+`data/artifacts/dataset/`.
 
-```sh
-cd /dev/shmem && ./test_block_loader.arm /path/to/payload
-```
+**Use `qnxuser`, not `root`.** The image ships OpenSSH's stock `sshd_config`
+with every directive commented out, so the effective default is
+`PermitRootLogin prohibit-password` and a root *password* login is refused. To
+use root anyway, note that `/etc/ssh` is a symlink into `/dev/shmem`, so the
+config is editable on a running board: uncomment `PermitRootLogin yes` and
+restart `sshd`.
 
-Watch out: `/tmp` and `/dev/shmem` are RAM, so it disappears on reboot.
+`/home/qnxuser`, `/tmp` and `/dev/shmem` are all RAM, so anything copied there
+is gone at reboot. The route that survives a reboot is putting the binaries
+inside the image — that is section 9's wiring step.
 
 ---
 
-## 9. Build and burn the boot image **[planned — our code is not wired in yet]**
+## 9. Build the boot image **[verified]**
 
-`RT-MOMS/images/ifs-rpi4.bin` is the stock prebuilt image; it contains no
-project code. Building an image that does contain it needs two changes first:
+The BSP builds end to end with this SDP. Measured in a scratch copy, so the
+repository stayed clean:
 
-1. a QNX-convention `Makefile` under `RT-MOMS/app/` (or a `src/app/` directory)
-   so `make install` copies the binaries into `install/aarch64le/...`;
-2. entries in `RT-MOMS/images/rpi4.build` for those binaries, and a launch line
-   in its `[+script] startup-script` block if they should start at boot.
-
-Then:
+| Step | How | Result |
+| --- | --- | --- |
+| Compile the BSP sources | `make` | exit 0, 83 s |
+| Build the image | `make images` | exit 0, 7 s, `ifs-rpi4.bin` = 36 197 292 B |
 
 ```bat
 cd RT-MOMS
@@ -187,15 +208,37 @@ P:\qnx\qnx800\qnxsdp-env.bat
 make
 ```
 
-which produces `images/ifs-rpi4.bin`, to be copied to the SD card's FAT
-partition together with the firmware files and a `config.txt` containing
-`kernel=ifs-rpi4.bin`.
+`make` runs `install` (copy `prebuilt/`, then build `src/` with `qcc`), `links`,
+then `images` (`mkifs`). If the `images` step says "nothing to be done", the
+copied image is newer than `rpi4.build` — delete `images/ifs-rpi4.bin` or touch
+the build file to force a rebuild.
 
-Known gap: `images/Makefile` ends with
-`-include $(CURDIR)/../../Templates_build_sdp800/template.mk`, and that directory
-does not exist in this checkout, so `$(MKIFSFLAGS)` is undefined. Momentics'
-System Builder normally creates it beside the BSP project; it will need to exist
-before `make` can build an image here.
+Two things to know before running it inside the repository:
+
+- It writes hundreds of files into `RT-MOMS/install/` and object files
+  throughout `RT-MOMS/src/`, and it **overwrites the committed**
+  `RT-MOMS/images/ifs-rpi4.bin`. Restore that with
+  `git checkout -- RT-MOMS/images/ifs-rpi4.bin`, and consider ignoring
+  `RT-MOMS/install/`.
+- The image it produces is *not* byte-identical to the shipped one
+  (36 197 292 B against 34 489 984 B): it resolves its components from this SDP
+  installation rather than from the environment QNX built the shipped image in.
+  Both boot the same way.
+
+`Templates_build_sdp800/template.mk` turns out not to be needed — the `-include`
+is optional, so `$(MKIFSFLAGS)` simply expands to nothing.
+
+**Deploying an image that contains our own code** still needs two wiring steps,
+which the successful build above does not provide:
+
+1. a QNX-convention `Makefile` under `RT-MOMS/app/` (or a `src/app/` directory)
+   so `make install` copies the binaries into `install/aarch64le/...`;
+2. entries in `RT-MOMS/images/rpi4.build` for those binaries, and a launch line
+   in its `[+script] startup-script` block if they should start at boot.
+
+Then the same `make` produces an `ifs-rpi4.bin` containing them, to be copied to
+the SD card's FAT partition together with the firmware files and a `config.txt`
+containing `kernel=ifs-rpi4.bin`.
 
 ---
 
