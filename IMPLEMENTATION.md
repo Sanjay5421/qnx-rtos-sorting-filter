@@ -7,7 +7,9 @@ commands that run all of this are in [REPRODUCE.md](REPRODUCE.md); this file
 explains what they exercise and why each stage is shaped the way it is.
 
 Paths below are relative to the repository root: `app/`, `tests/` and `images/`
-all live under `RT-MOMS/`, and the generated datasets are under `data/`.
+all live under `RT-MOMS/`, and the generated datasets are under `data/`. A
+plain-language companion, organised by milestone and written for explaining the
+project out loud, is in [STUDY-GUIDE.md](STUDY-GUIDE.md).
 
 Stages are marked **[built]** when the code exists and has been run (host and, for
 everything in the image, on the board), and **[planned]** when only the interface
