@@ -1,0 +1,222 @@
+% ---------------------------------------------------------------------------
+% theme.tex — layout and colour scheme for the project slide deck
+%
+% Deliberately minimal: a coloured title rule, a quiet footer, and flat
+% callouts. Everything visual lives in this file, so the palette or the chrome
+% can be changed without touching a single slide.
+%
+% Load order: \input this after \documentclass{beamer}. It loads what it needs.
+% ---------------------------------------------------------------------------
+
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta, positioning, calc, fit, backgrounds, shapes.geometric}
+\usepackage[most]{tcolorbox}
+\usepackage{booktabs}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{amsmath,amssymb}
+
+% ---------------------------------------------------------------------------
+% 1. Palette — five colours, and three neutrals
+%
+% Re-skin the whole deck by changing these values. Nothing else in this file
+% or in main.tex hard-codes a colour.
+% ---------------------------------------------------------------------------
+
+\definecolor{rtmPrimary}{HTML}{12314F}   % deep navy   — titles, rules, structure
+\definecolor{rtmAccent}{HTML}{0E9AA7}    % teal        — emphasis, arrows, bullets
+\definecolor{rtmAlert}{HTML}{E8833A}     % amber       — warnings, "before"
+\definecolor{rtmGood}{HTML}{2E9E5B}      % green       — results, "after"
+\definecolor{rtmInk}{HTML}{1F2933}       % body text
+\definecolor{rtmMuted}{HTML}{6B7A8F}     % captions, footer, secondary
+\definecolor{rtmLine}{HTML}{D5DEE7}      % hairlines, table rules
+\definecolor{rtmSurface}{HTML}{EDF2F7}   % box fill, code background
+
+% ---------------------------------------------------------------------------
+% 2. Beamer colours and fonts
+% ---------------------------------------------------------------------------
+
+\setbeamercolor{normal text}{fg=rtmInk, bg=white}
+\setbeamercolor{structure}{fg=rtmPrimary}
+\setbeamercolor{frametitle}{fg=rtmPrimary, bg=white}
+\setbeamercolor{title}{fg=rtmPrimary}
+\setbeamercolor{subtitle}{fg=rtmMuted}
+\setbeamercolor{author}{fg=rtmInk}
+\setbeamercolor{date}{fg=rtmMuted}
+\setbeamercolor{itemize item}{fg=rtmAccent}
+\setbeamercolor{itemize subitem}{fg=rtmMuted}
+\setbeamercolor{enumerate item}{fg=rtmAccent}
+\setbeamercolor{alerted text}{fg=rtmAccent}
+\setbeamercolor{footline}{fg=rtmMuted}
+\setbeamercolor{block title}{fg=white, bg=rtmPrimary}
+\setbeamercolor{block body}{fg=rtmInk, bg=rtmSurface}
+\setbeamercolor{block title alerted}{fg=white, bg=rtmAlert}
+\setbeamercolor{block body alerted}{fg=rtmInk, bg=rtmSurface}
+\setbeamercolor{block title example}{fg=white, bg=rtmGood}
+\setbeamercolor{block body example}{fg=rtmInk, bg=rtmSurface}
+
+\setbeamerfont{frametitle}{size=\large, series=\bfseries}
+\setbeamerfont{title}{size=\LARGE, series=\bfseries}
+\setbeamerfont{subtitle}{size=\large}
+\setbeamerfont{author}{size=\small}
+\setbeamerfont{footline}{size=\tiny}
+\setbeamerfont{caption}{size=\scriptsize}
+
+% ---------------------------------------------------------------------------
+% 3. Frame chrome
+%
+% A short teal rule above the frame title, the title in navy, and a hairline
+% under it. The footer carries the short title on the left and the page number
+% on the right. No navigation symbols, no colour band across the slide.
+% ---------------------------------------------------------------------------
+
+\useinnertheme{default}
+\useoutertheme{default}
+\setbeamertemplate{navigation symbols}{}
+\setbeamersize{text margin left=8mm, text margin right=8mm}
+
+\setbeamertemplate{frametitle}{%
+  \vskip3mm%
+  {\color{rtmAccent}\hrule height 1.4pt width 18mm}%
+  \vskip2mm%
+  {\usebeamerfont{frametitle}\usebeamercolor[fg]{frametitle}%
+   \insertframetitle\par}%
+  \vskip1.6mm%
+  {\color{rtmLine}\hrule height 0.4pt}%
+  \vskip1.5mm%
+}
+
+\setbeamertemplate{footline}{%
+  \hbox to\paperwidth{%
+    \hskip8mm%
+    {\usebeamerfont{footline}\usebeamercolor[fg]{footline}%
+      \insertshortauthor\hskip1em\textbar\hskip1em\insertshorttitle}%
+    \hfill%
+    {\usebeamerfont{footline}\usebeamercolor[fg]{footline}%
+      \insertframenumber\,/\,\inserttotalframenumber}%
+    \hskip8mm%
+  }%
+  \vskip2.2mm%
+}
+
+% ---------------------------------------------------------------------------
+% 4. Title page
+%
+% A navy band across the top third, with the teal rule under it. The lower
+% part of the slide stays white, which is where a university logo would go.
+% ---------------------------------------------------------------------------
+
+\setbeamertemplate{title page}{%
+  \begin{tikzpicture}[remember picture, overlay]
+    \fill[rtmPrimary]
+      (current page.north west) rectangle ([yshift=-0.47\paperheight]current page.north east);
+    \fill[rtmAccent]
+      ([yshift=-0.47\paperheight]current page.north west)
+      rectangle ([yshift=-0.478\paperheight]current page.north east);
+    \node[anchor=north west, inner sep=0pt, text width=0.84\paperwidth]
+      at ([xshift=8mm, yshift=-12mm]current page.north west) {%
+        {\color{rtmAccent}\footnotesize\bfseries\insertinstitute}\par
+        \vskip3mm
+        {\color{white}\LARGE\bfseries\inserttitle}\par
+        \vskip2.5mm
+        {\color{rtmAccent!65!white}\large\insertsubtitle}\par
+      };
+    \node[anchor=south west, inner sep=0pt, text width=0.84\paperwidth]
+      at ([xshift=8mm, yshift=8mm]current page.south west) {%
+        {\color{rtmInk}\small\insertauthor}\par
+        \vskip2mm
+        {\color{rtmMuted}\small\insertdate}\par
+      };
+  \end{tikzpicture}%
+}
+
+% ---------------------------------------------------------------------------
+% 5. Section pages
+%
+% A plain slide with the section number in teal above the section name.
+% ---------------------------------------------------------------------------
+
+\AtBeginSection[]{%
+  \begin{frame}[plain]
+    \vfill
+    {\color{rtmAccent}\hrule height 1.4pt width 18mm}\par
+    \vskip3mm
+    {\color{rtmAccent}\small\bfseries PART \insertsectionnumber\par}
+    \vskip1.5mm
+    {\color{rtmPrimary}\LARGE\bfseries\insertsectionhead\par}
+    \vfill
+  \end{frame}%
+}
+
+% ---------------------------------------------------------------------------
+% 6. Boxes — one left accent bar on a neutral fill, nothing else
+% ---------------------------------------------------------------------------
+
+\newtcolorbox{highlight}[1][]{%
+  enhanced, breakable,
+  colback=rtmSurface, colframe=rtmAccent,
+  boxrule=0pt, leftrule=2.4pt, arc=0pt, outer arc=0pt,
+  left=2.5mm, right=2mm, top=1.6mm, bottom=1.6mm,
+  fontupper=\small, #1}
+
+\newtcolorbox{tech}[1][]{%
+  enhanced, breakable,
+  colback=rtmSurface, colframe=rtmPrimary,
+  boxrule=0pt, leftrule=2.4pt, arc=0pt, outer arc=0pt,
+  left=2.5mm, right=2mm, top=1.6mm, bottom=1.6mm,
+  fontupper=\small, #1}
+
+\newtcolorbox{warn}[1][]{%
+  enhanced, breakable,
+  colback=rtmSurface, colframe=rtmAlert,
+  boxrule=0pt, leftrule=2.4pt, arc=0pt, outer arc=0pt,
+  left=2.5mm, right=2mm, top=1.6mm, bottom=1.6mm,
+  fontupper=\small, #1}
+
+% ---------------------------------------------------------------------------
+% 7. Tables, code, diagrams, shorthands
+% ---------------------------------------------------------------------------
+
+\setbeamertemplate{caption}[numbered]
+\newcommand{\rtmtablehead}[1]{{\color{rtmPrimary}\bfseries #1}}
+\renewcommand{\arraystretch}{1.15}
+
+\lstdefinestyle{rtmc}{%
+  language=C,
+  basicstyle=\ttfamily\scriptsize,
+  keywordstyle=\color{rtmPrimary}\bfseries,
+  commentstyle=\color{rtmMuted}\itshape,
+  stringstyle=\color{rtmAccent},
+  numberstyle=\ttfamily\tiny\color{rtmMuted},
+  backgroundcolor=\color{rtmSurface},
+  frame=none, framesep=1.5mm, xleftmargin=2mm,
+  aboveskip=1.5mm, belowskip=1.5mm,
+  showstringspaces=false, breaklines=true,
+  columns=fullflexible, keepspaces=true, upquote=true,
+}
+\lstset{style=rtmc}
+
+\tikzset{
+  node distance=6mm and 9mm,
+  block/.style={rectangle, rounded corners=1.2pt, draw=rtmPrimary, line width=0.5pt,
+                fill=white, text=rtmInk, align=center,
+                inner xsep=2.4mm, inner ysep=1.6mm, font=\scriptsize},
+  accent block/.style={block, draw=rtmAccent, fill=rtmAccent!8},
+  muted block/.style={block, draw=rtmMuted, fill=rtmSurface, text=rtmMuted},
+  flow/.style={-{Latex[length=1.6mm]}, draw=rtmAccent, line width=0.6pt},
+  flow dashed/.style={flow, dashed},
+  edge label/.style={font=\tiny, text=rtmMuted, inner sep=1pt},
+}
+
+% \concept{…} — teal bold inline emphasis (not \tag: beamer owns that name)
+\newcommand{\concept}[2][rtmAccent]{{\color{#1}\bfseries #2}}
+
+% \num{1.25} — a number the eye should catch
+\newcommand{\num}[1]{\textcolor{rtmAccent}{\bfseries #1}}
+
+% \key{…} — a short label in a navy pill, for a slide's takeaway
+\newcommand{\key}[1]{%
+  \tikz[baseline=(k.base)]\node[fill=rtmPrimary, text=white, rounded corners=1pt,
+    inner xsep=2mm, inner ysep=0.8mm, font=\scriptsize\bfseries] (k) {#1};}
