@@ -1,33 +1,39 @@
-# Build the slide deck.
+# Build the slide deck (all four themes).
 #
-#   make            → build main.pdf
-#   make view       → build and open it
-#   make clean      → remove every generated file
+#   make            → theme-*/main-*.pdf
+#   make a          → just theme A
+#   make view-a     → build and open a theme
+#   make clean      → remove generated files
 #
-# latexmk runs pdflatex as many times as the cross-references need, so the
-# page totals and the outline settle on their own.
+# Each theme compiles in its own folder; the shared sources are one level up,
+# so nothing needs copying. latexmk would also work, but plain pdflatex run
+# twice is enough and is guaranteed to be installed alongside the themes.
 
-MAIN    = main
-LATEXMK = latexmk
-FLAGS   = -pdf -interaction=nonstopmode -halt-on-error
+THEMES  = a b c d
+LATEX   = pdflatex -interaction=nonstopmode
 
-.PHONY: all view clean
+.PHONY: all view clean $(THEMES) $(addprefix view-,$(THEMES))
 
-all: $(MAIN).pdf
+all:
+	sh build-all.sh
 
-$(MAIN).pdf: $(MAIN).tex theme.tex
-	$(LATEXMK) $(FLAGS) $(MAIN).tex
+# Per-theme: two passes, so the page totals and cross-references settle.
+$(THEMES):
+	cd theme-$@ && $(LATEX) main-$@.tex > build.log 2>&1 \
+	           && $(LATEX) main-$@.tex > build.log 2>&1
+	@echo "theme $@ → theme-$@/main-$@.pdf"
 
-# Straight pdfLaTeX, if latexmk is not installed.
-pdf: $(MAIN).tex theme.tex
-	pdflatex $(FLAGS) $(MAIN).tex
-	pdflatex $(FLAGS) $(MAIN).tex
-
-view: $(MAIN).pdf
-	@start "" $(MAIN).pdf 2>/dev/null || xdg-open $(MAIN).pdf 2>/dev/null || \
-	  open $(MAIN).pdf
+$(addprefix view-,$(THEMES)): view-%: %
+	@start "" theme-$*/main-$*.pdf 2>/dev/null || \
+	 xdg-open theme-$*/main-$*.pdf 2>/dev/null || \
+	 open theme-$*/main-$*.pdf
 
 clean:
-	$(LATEXMK) -C $(MAIN).tex 2>/dev/null || true
-	-rm -f $(MAIN).pdf $(MAIN).aux $(MAIN).log $(MAIN).nav $(MAIN).out \
-	       $(MAIN).snm $(MAIN).toc $(MAIN).fls $(MAIN).fdb_latexmk
+	-rm -f $(addprefix theme-,$(THEMES))
+	-for t in $(THEMES); do \
+		rm -f theme-$$t/main-$$t.pdf theme-$$t/main-$$t.aux \
+		      theme-$$t/main-$$t.log theme-$$t/main-$$t.nav \
+		      theme-$$t/main-$$t.out theme-$$t/main-$$t.snm \
+		      theme-$$t/main-$$t.toc theme-$$t/main-$$t.vrb \
+		      theme-$$t/build.log; \
+	done

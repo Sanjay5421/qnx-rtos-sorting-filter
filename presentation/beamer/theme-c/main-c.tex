@@ -1,0 +1,14 @@
+% ---------------------------------------------------------------------------
+% main-c.tex — wrapper for theme C. Nothing to edit here but the theme name:
+% content lives in ../content.tex and the metadata in ../deck.tex.
+%
+%   pdflatex main-c.tex   (twice)
+% ---------------------------------------------------------------------------
+
+\documentclass[aspectratio=169, 11pt]{beamer}
+
+\input{../deck}       % shared preamble and deck metadata
+\input{theme-c}       % palette, chrome, boxes, title page
+
+\begin{document}
+\input{../content}    % the slides

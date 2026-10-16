@@ -1,0 +1,14 @@
+% ---------------------------------------------------------------------------
+% main-b.tex — wrapper for theme B. Nothing to edit here but the theme name:
+% content lives in ../content.tex and the metadata in ../deck.tex.
+%
+%   pdflatex main-b.tex   (twice)
+% ---------------------------------------------------------------------------
+
+\documentclass[aspectratio=169, 11pt]{beamer}
+
+\input{../deck}       % shared preamble and deck metadata
+\input{theme-b}       % palette, chrome, boxes, title page
+
+\begin{document}
+\input{../content}    % the slides

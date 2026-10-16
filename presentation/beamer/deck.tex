@@ -1,0 +1,48 @@
+% ---------------------------------------------------------------------------
+% deck.tex — shared preamble for every theme
+%
+% Loads only what every preview needs, and defines the title metadata once, so
+% the four themes differ in colour and chrome and in nothing else. Each theme
+% is then \input from its own wrapper:
+%
+%     theme-a/main-a.tex   →  \input{deck}  \input{theme}  \input{content}
+%
+% Fonts and packages that only one theme needs stay in that theme's spec.
+% ---------------------------------------------------------------------------
+
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta, positioning, calc, fit, backgrounds, shapes.geometric}
+\usepackage[most]{tcolorbox}
+\usepackage{booktabs}
+\usepackage{listings}
+\usepackage{amsmath,amssymb}
+\usepackage{xcolor}
+
+% --- Deck metadata, written once -------------------------------------------
+
+\title[RT-MOMS]{Real-Time Multi-Core Sorting and Median Filter Service}
+\subtitle{26ELC331 — Real-Time Operating Systems}
+\institute{Amrita Vishwa Vidyapeetham}
+\date{\today}
+
+\newcommand{\authOne}{Anmol Govindarajapuram Krishnan — CB.EN.U4EEE23103}
+\newcommand{\authTwo}{Mauli Rajguru — CB.EN.U4EEE23120}
+\newcommand{\authThree}{Sanjay TS — CB.EN.U4EEE23136}
+\newcommand{\authorsBlock}{\authOne\\ \authTwo\\ \authThree}
+
+\author[A. Krishnan, M. Rajguru, S. TS]{\authorsBlock}
+
+% ---------------------------------------------------------------------------
+% Elements every theme must style. The preview slides use only these names, so
+% swapping a theme never touches the content.
+%
+%   colours   rtmPrimary rtmAccent rtmAlert rtmGood rtmInk rtmMuted
+%             rtmLine rtmSurface
+%   boxes     highlight  (accent rule)   tech  (primary rule)
+%             warn       (alert rule)
+%   macros    \rtmtablehead \concept \num \key
+%   tikz      block  accent block  muted block  flow  flow dashed  edge label
+%   chrome    frame title, footline, title page, section page
+% ---------------------------------------------------------------------------

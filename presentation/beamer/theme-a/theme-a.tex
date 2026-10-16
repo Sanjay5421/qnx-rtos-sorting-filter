@@ -1,42 +1,27 @@
 % ---------------------------------------------------------------------------
-% theme.tex — layout and colour scheme for the project slide deck
+% theme-a — Navy & Teal (calm, minimal)
 %
-% Deliberately minimal: a coloured title rule, a quiet footer, and flat
-% callouts. Everything visual lives in this file, so the palette or the chrome
-% can be changed without touching a single slide.
+% The quiet one: white slides, a short teal rule above each frame title, full
+% colour reserved for the title and closing panels. Reads well on a projector
+% and stays out of the way of dense technical content.
 %
-% Load order: \input this after \documentclass{beamer}. It loads what it needs.
+% This file is both the theme and its description. To build a new theme, copy
+% a theme-*/ folder and change the palette, the chrome templates and the title
+% page — nothing else in the deck needs to know.
 % ---------------------------------------------------------------------------
 
-\usepackage[T1]{fontenc}
-\usepackage{lmodern}
-\usepackage{tikz}
-\usetikzlibrary{arrows.meta, positioning, calc, fit, backgrounds, shapes.geometric}
-\usepackage[most]{tcolorbox}
-\usepackage{booktabs}
-\usepackage{listings}
-\usepackage{xcolor}
-\usepackage{amsmath,amssymb}
+% --- palette ---------------------------------------------------------------
 
-% ---------------------------------------------------------------------------
-% 1. Palette — five colours, and three neutrals
-%
-% Re-skin the whole deck by changing these values. Nothing else in this file
-% or in main.tex hard-codes a colour.
-% ---------------------------------------------------------------------------
-
-\definecolor{rtmPrimary}{HTML}{12314F}   % deep navy   — titles, rules, structure
-\definecolor{rtmAccent}{HTML}{0E9AA7}    % teal        — emphasis, arrows, bullets
-\definecolor{rtmAlert}{HTML}{E8833A}     % amber       — warnings, "before"
-\definecolor{rtmGood}{HTML}{2E9E5B}      % green       — results, "after"
+\definecolor{rtmPrimary}{HTML}{12314F}   % deep navy
+\definecolor{rtmAccent}{HTML}{0E9AA7}    % teal
+\definecolor{rtmAlert}{HTML}{E8833A}     % amber
+\definecolor{rtmGood}{HTML}{2E9E5B}      % green
 \definecolor{rtmInk}{HTML}{1F2933}       % body text
-\definecolor{rtmMuted}{HTML}{6B7A8F}     % captions, footer, secondary
-\definecolor{rtmLine}{HTML}{D5DEE7}      % hairlines, table rules
-\definecolor{rtmSurface}{HTML}{EDF2F7}   % box fill, code background
+\definecolor{rtmMuted}{HTML}{6B7A8F}     % captions, footer
+\definecolor{rtmLine}{HTML}{D5DEE7}      % hairlines
+\definecolor{rtmSurface}{HTML}{EDF2F7}   % box fills, code background
 
-% ---------------------------------------------------------------------------
-% 2. Beamer colours and fonts
-% ---------------------------------------------------------------------------
+% --- beamer colours and fonts ----------------------------------------------
 
 \setbeamercolor{normal text}{fg=rtmInk, bg=white}
 \setbeamercolor{structure}{fg=rtmPrimary}
@@ -64,13 +49,7 @@
 \setbeamerfont{footline}{size=\tiny}
 \setbeamerfont{caption}{size=\scriptsize}
 
-% ---------------------------------------------------------------------------
-% 3. Frame chrome
-%
-% A short teal rule above the frame title, the title in navy, and a hairline
-% under it. The footer carries the short title on the left and the page number
-% on the right. No navigation symbols, no colour band across the slide.
-% ---------------------------------------------------------------------------
+% --- frame chrome ----------------------------------------------------------
 
 \useinnertheme{default}
 \useoutertheme{default}
@@ -81,8 +60,7 @@
   \vskip3mm%
   {\color{rtmAccent}\hrule height 1.4pt width 18mm}%
   \vskip2mm%
-  {\usebeamerfont{frametitle}\usebeamercolor[fg]{frametitle}%
-   \insertframetitle\par}%
+  {\usebeamerfont{frametitle}\usebeamercolor[fg]{frametitle}\insertframetitle\par}%
   \vskip1.6mm%
   {\color{rtmLine}\hrule height 0.4pt}%
   \vskip1.5mm%
@@ -101,12 +79,7 @@
   \vskip2.2mm%
 }
 
-% ---------------------------------------------------------------------------
-% 4. Title page
-%
-% A navy band across the top third, with the teal rule under it. The lower
-% part of the slide stays white, which is where a university logo would go.
-% ---------------------------------------------------------------------------
+% --- title page ------------------------------------------------------------
 
 \setbeamertemplate{title page}{%
   \begin{tikzpicture}[remember picture, overlay]
@@ -125,18 +98,14 @@
       };
     \node[anchor=south west, inner sep=0pt, text width=0.84\paperwidth]
       at ([xshift=8mm, yshift=8mm]current page.south west) {%
-        {\color{rtmInk}\small\insertauthor}\par
+        {\color{rtmInk}\small\authorsBlock}\par
         \vskip2mm
         {\color{rtmMuted}\small\insertdate}\par
       };
   \end{tikzpicture}%
 }
 
-% ---------------------------------------------------------------------------
-% 5. Section pages
-%
-% A plain slide with the section number in teal above the section name.
-% ---------------------------------------------------------------------------
+% --- section pages ---------------------------------------------------------
 
 \AtBeginSection[]{%
   \begin{frame}[plain]
@@ -150,34 +119,24 @@
   \end{frame}%
 }
 
-% ---------------------------------------------------------------------------
-% 6. Boxes — one left accent bar on a neutral fill, nothing else
-% ---------------------------------------------------------------------------
+% --- boxes -----------------------------------------------------------------
 
 \newtcolorbox{highlight}[1][]{%
-  enhanced, breakable,
-  colback=rtmSurface, colframe=rtmAccent,
+  enhanced, breakable, colback=rtmSurface, colframe=rtmAccent,
   boxrule=0pt, leftrule=2.4pt, arc=0pt, outer arc=0pt,
-  left=2.5mm, right=2mm, top=1.6mm, bottom=1.6mm,
-  fontupper=\small, #1}
+  left=2.5mm, right=2mm, top=1.6mm, bottom=1.6mm, fontupper=\small, #1}
 
 \newtcolorbox{tech}[1][]{%
-  enhanced, breakable,
-  colback=rtmSurface, colframe=rtmPrimary,
+  enhanced, breakable, colback=rtmSurface, colframe=rtmPrimary,
   boxrule=0pt, leftrule=2.4pt, arc=0pt, outer arc=0pt,
-  left=2.5mm, right=2mm, top=1.6mm, bottom=1.6mm,
-  fontupper=\small, #1}
+  left=2.5mm, right=2mm, top=1.6mm, bottom=1.6mm, fontupper=\small, #1}
 
 \newtcolorbox{warn}[1][]{%
-  enhanced, breakable,
-  colback=rtmSurface, colframe=rtmAlert,
+  enhanced, breakable, colback=rtmSurface, colframe=rtmAlert,
   boxrule=0pt, leftrule=2.4pt, arc=0pt, outer arc=0pt,
-  left=2.5mm, right=2mm, top=1.6mm, bottom=1.6mm,
-  fontupper=\small, #1}
+  left=2.5mm, right=2mm, top=1.6mm, bottom=1.6mm, fontupper=\small, #1}
 
-% ---------------------------------------------------------------------------
-% 7. Tables, code, diagrams, shorthands
-% ---------------------------------------------------------------------------
+% --- tables, code, diagrams, macros ----------------------------------------
 
 \setbeamertemplate{caption}[numbered]
 \newcommand{\rtmtablehead}[1]{{\color{rtmPrimary}\bfseries #1}}
@@ -210,13 +169,45 @@
   edge label/.style={font=\tiny, text=rtmMuted, inner sep=1pt},
 }
 
-% \concept{…} — teal bold inline emphasis (not \tag: beamer owns that name)
+% \concept{…} — inline emphasis (not \tag: beamer owns that name)
 \newcommand{\concept}[2][rtmAccent]{{\color{#1}\bfseries #2}}
-
 % \num{1.25} — a number the eye should catch
 \newcommand{\num}[1]{\textcolor{rtmAccent}{\bfseries #1}}
-
-% \key{…} — a short label in a navy pill, for a slide's takeaway
+% \key{…} — a short label in a filled pill, for a slide's takeaway
 \newcommand{\key}[1]{%
   \tikz[baseline=(k.base)]\node[fill=rtmPrimary, text=white, rounded corners=1pt,
     inner xsep=2mm, inner ysep=0.8mm, font=\scriptsize\bfseries] (k) {#1};}
+
+% A quiet line naming the theme, only on the two preview slides. Blank in the
+% real deck.
+\newcommand{\themeSignature}{%
+  \vfill
+  {\color{rtmMuted}\scriptsize\bfseries THEME A — NAVY \& TEAL \textbullet{}
+   calm, white slides, colour only in the panels}\par}
+% --- closing slide ---------------------------------------------------------
+
+\newcommand{\closingSlide}{%
+  \begin{frame}[plain]
+    \begin{tikzpicture}[remember picture, overlay]
+      \fill[rtmPrimary]
+        (current page.north west) rectangle ([yshift=-0.40\paperheight]current page.north east);
+      \fill[rtmAccent]
+        ([yshift=-0.40\paperheight]current page.north west)
+        rectangle ([yshift=-0.408\paperheight]current page.north east);
+      \node[anchor=north west, inner sep=0pt, text width=0.84\paperwidth]
+        at ([xshift=8mm, yshift=-12mm]current page.north west) {%
+          {\color{rtmAccent}\footnotesize\bfseries THANK YOU}\par
+          \vskip4mm
+          {\color{white}\Large\bfseries\inserttitle}\par
+        };
+      \node[anchor=south west, inner sep=0pt, text width=0.84\paperwidth]
+        at ([xshift=8mm, yshift=10mm]current page.south west) {%
+          {\color{rtmInk}\small\authOne}\par
+          {\color{rtmInk}\small\authTwo}\par
+          {\color{rtmInk}\small\authThree}\par
+          \vskip2mm
+          {\color{rtmMuted}\scriptsize\insertsubtitle}
+        };
+    \end{tikzpicture}%
+  \end{frame}%
+}
