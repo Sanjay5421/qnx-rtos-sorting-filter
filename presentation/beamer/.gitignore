@@ -10,5 +10,6 @@
 *.synctex.gz
 *.vrb
 
-# Page renders used for checking the layout
+# Page renders and screenshot triage, used while checking the layout
 .preview/
+.identify/

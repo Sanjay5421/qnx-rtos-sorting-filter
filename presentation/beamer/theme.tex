@@ -51,6 +51,11 @@
 \setbeamerfont{footline}{family=\ttfamily, size=\tiny}
 \setbeamerfont{caption}{size=\scriptsize}
 
+% Lists carry most of the deck, so their spacing is tightened once, here,
+% rather than per slide. Beamer's defaults are generous for projection.
+\setbeamertemplate{itemize/enumerate body begin}{\vskip0.4mm}
+\setbeamertemplate{itemize/enumerate subbody begin}{\vskip0.2mm}
+
 % --- frame chrome ----------------------------------------------------------
 
 \useinnertheme{default}
@@ -59,14 +64,16 @@
 \setbeamersize{text margin left=8mm, text margin right=8mm}
 
 % "d.03" in lime, then the title in monospace, with a lime rule under it.
+% The vertical skips are kept tight on purpose: this block is on every frame,
+% and the height it costs is height the content does not get.
 \setbeamertemplate{frametitle}{%
-  \vskip3mm%
+  \vskip1.6mm%
   {\usebeamerfont{frametitle}%
    {\color{rtmAccentInk}\bfseries d.\insertframenumber}\hskip1.4em%
    \usebeamercolor[fg]{frametitle}\insertframetitle\par}%
-  \vskip1.6mm%
+  \vskip1.1mm%
   {\color{rtmAccent!55!white}\hrule height 1pt}%
-  \vskip1.6mm%
+  \vskip1.1mm%
 }
 
 \setbeamertemplate{footline}{%
@@ -93,13 +100,13 @@
     \fill[rtmAccent]
       ([yshift=-6mm]current page.north west) rectangle ([yshift=-7.6mm]current page.north east);
     \node[anchor=north west, inner sep=0pt, text width=0.84\paperwidth]
-      at ([xshift=8mm, yshift=-22mm]current page.north west) {%
+      at ([xshift=8mm, yshift=-19mm]current page.north west) {%
         {\color{rtmMuted}\ttfamily\footnotesize\bfseries\insertinstitute}\par
-        \vskip5mm
+        \vskip4mm
         {\color{rtmPrimary}\LARGE\bfseries\inserttitle}\par
-        \vskip4mm
+        \vskip3mm
         {\color{rtmAccent}\hrule height 2pt width 26mm}\par
-        \vskip4mm
+        \vskip3mm
         {\color{rtmAccent2}\large\insertsubtitle}\par
       };
     \node[anchor=south west, inner sep=0pt, text width=0.84\paperwidth]
@@ -177,7 +184,7 @@
                       fill=rtmSurface, text=rtmMuted},
   flow/.style={-{Latex[length=1.6mm]}, draw=rtmAccent2, line width=0.7pt},
   flow dashed/.style={flow, draw=rtmAccentInk, dashed},
-  edge label/.style={font=\tiny, text=rtmMuted, inner sep=1pt},
+  edge label/.style={font=\scriptsize, text=rtmMuted, inner sep=1pt},
 }
 
 \newcommand{\concept}[2][rtmAccentInk]{{\color{#1}\bfseries #2}}

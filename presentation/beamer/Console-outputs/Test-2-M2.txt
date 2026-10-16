@@ -1,0 +1,303 @@
+Serial  Port opened
+Hypervisor support disabled
+MMU: 16-bit ASID 44-bit PA TCR_EL1=00000014b5183519
+GICv2: 256 interrupts
+GICv2: routing SPIs to gic cpu 0
+cpu0: MPIDR=0000000080000000
+cpu0: MIDR=410fd083 Cortex-A72 r0p3
+cpu0: DCZID_EL0=0x00000004 (64 bytes)
+cpu0: CWG=4 ERG=4 Dminline=4 Iminline=4 PIPT
+cpu0: CLIDR=a200023 LoUU=1 LoC=2 LoUIS=1
+cpu0: L1 Icache 48K linesz=64 set/way=256/3
+cpu0: L1 Dcache 32K linesz=64 set/way=256/2
+cpu0: L2 Unified 1024K linesz=64 set/way=1024/16
+cpu0: GICv2 cpu interface 0
+Loading IFS...done
+cpu1: MPIDR=0000000080000001
+cpu1: MIDR=410fd083 Cortex-A72 r0p3
+cpu1: DCZID_EL0=0x00000004 (64 bytes)
+cpu1: CWG=4 ERG=4 Dminline=4 Iminline=4 PIPT
+cpu1: CLIDR=a200023 LoUU=1 LoC=2 LoUIS=1
+cpu1: L1 Icache 48K linesz=64 set/way=256/3
+cpu1: L1 Dcache 32K linesz=64 set/way=256/2
+cpu1: L2 Unified 1024K linesz=64 set/way=1024/16
+cpu1: GICv2 cpu interface 1
+cpu2: MPIDR=0000000080000002
+cpu2: MIDR=410fd083 Cortex-A72 r0p3
+cpu2: DCZID_EL0=0x00000004 (64 bytes)
+cpu2: CWG=4 ERG=4 Dminline=4 Iminline=4 PIPT
+cpu2: CLIDR=a200023 LoUU=1 LoC=2 LoUIS=1
+cpu2: L1 Icache 48K linesz=64 set/way=256/3
+cpu2: L1 Dcache 32K linesz=64 set/way=256/2
+cpu2: L2 Unified 1024K linesz=64 set/way=1024/16
+cpu2: GICv2 cpu interface 2
+cpu3: MPIDR=0000000080000003
+cpu3: MIDR=410fd083 Cortex-A72 r0p3
+cpu3: DCZID_EL0=0x00000004 (64 bytes)
+cpu3: CWG=4 ERG=4 Dminline=4 Iminline=4 PIPT
+cpu3: CLIDR=a200023 LoUU=1 LoC=2 LoUIS=1
+cpu3: L1 Icache 48K linesz=64 set/way=256/3
+cpu3: L1 Dcache 32K linesz=64 set/way=256/2
+cpu3: L2 Unified 1024K linesz=64 set/way=1024/16
+cpu3: GICv2 cpu interface 3
+
+System page at phys:0000000000015000 user:ffffff8040208000 kern:ffffff8040204000
+Starting next program at vffffff8060075c80
+syspage::hypinfo::flags=0x00000000
+ 
+Welcome to QNX 8.0.0 on RaspberryPi4B !
+ 
+Starting wdtkick ...
+Starting I2C driver ...
+Starting PCI Server ...
+Starting serial driver (/dev/ser1)
+Starting SPI master driver ...
+Starting SDMMC driver (/dev/sd0)
+Path=0 - bcm2711
+ target=0 lun=0     Direct-Access(0) - SDMMC:       Rev: 1.0
+Inform vc to load vl805 firmware
+Starting USB xHCI controller in the host mode (/dev/usb/*)...
+Starting devf-ram filesystem ...
+Starting networking ...
+Starting DHCP client ...
+Starting SSH daemon ...
+/usr/libexec/sshd-auth does not exist or is not executable
+Starting devc-pty manager ...
+Starting qconn daemon ...
+Starting shell ...
+# uname -a
+QNX localhost 8.0.0 2026/06/05-16:21:14EDT RaspberryPi4B aarch64le
+# cd /tmp
+# ls
+bcm2711_dmac_mutex  ssh_host_ecdsa_key        ssh_host_rsa_key
+fs9                 ssh_host_ecdsa_key.pub    ssh_host_rsa_key.pub
+pci                 ssh_host_ed25519_key      sshd_config
+slogger2            ssh_host_ed25519_key.pub  vl805_version.txt
+# test_protocol 
+protocol tests (the common message definition)
+
+  test_block_is_64kib                  ok
+  test_message_types                   ok
+  test_pulse_code                      ok
+  test_field_layout                    ok
+  test_checksum                        ok
+  test_submit_prepare_is_deterministic ok
+  test_submit_validation               ok
+  test_partial_block_checksum          ok
+  test_names                           ok
+
+  82 checks, 0 failed, 0 skipped
+# test_sensor /data
+virtual sensor tests
+  dataset: /data
+
+  test_config_defaults                 ok
+sensor: open called with a NULL path
+sensor_no_such_file.bin: No such file or directory
+sensor: sensor_tmp_planar.bin: unknown layout 99
+sensor: sensor_tmp_planar.bin: stride must be at least 1 (got 0)
+sensor: sensor_tmp_planar.bin: offset must be in [0, 1) (got 5)
+sensor: sensor_tmp_planar.bin: offset must be in [0, 1) (got 1)
+sensor: sensor_tmp_tiny.bin: 3 bytes is not a whole number of float32 values
+sensor: sensor_tmp_empty.bin: file is empty
+sensor: sensor_tmp_partial.bin: 6 values is not a whole number of 4-value records
+  test_open_rejects_bad_input          ok
+  test_exact_bits_round_trip           ok
+  test_strided_layout                  ok
+  test_frame_cap                       ok
+  test_loop_wraps                      ok
+  test_reset_restarts                  ok
+  test_window_boundaries               ok
+  test_timestamps                      ok
+  test_block_read                      ok
+  test_paced_reads                     ok
+  test_real_layouts_agree              ok
+  test_real_block_partition            ok
+# cksum /d
+data/  dev/   
+# cksum /data/bin/channels/r1_voltage.bin 
+2261229843 240000 /data/bin/channels/r1_voltage.bin
+# cksum /data/bin/Chen2020_c1_T25_discharge.bin
+530587124 960000 /data/bin/Chen2020_c1_T25_discharge.bin
+# loader_demo /data/bin/channels/r1_voltage.bin planar voltage 100
+file    : /data/bin/channels/r1_voltage.bin
+layout  : planar
+channel : voltage (offset 1 in an interleaved record)
+rate    : 100 Hz
+samples : 60000
+
+  block  seq  first  samples       min         max      checksum  server
+  -----  ---  -----  -------  ----------  ----------  ----------  ------
+      0    0      0    16384      3.5662       4.274  0xe90d24d2  accepted
+      1    1  16384    16384       3.457       3.871  0xc98cd3b2  accepted
+      2    2  32768    16384      2.9529      3.5868  0x14c728bb  accepted
+      3    3  49152    10848      2.5978      3.5662  0x362ab592  accepted
+
+  blocks           : 4 (3 full, 1 short)
+  samples          : 60000
+  block bytes sent : 262144 B = 4 x 65536 B
+  sample bytes     : 240000 B
+  accepted         : 4 of 4
+  first sample     : 4.19853
+# loader_demo /data/bin/Chen2020_c1_T25_discharge.bin interleaved voltage 100
+file    : /data/bin/Chen2020_c1_T25_discharge.bin
+layout  : interleaved
+channel : voltage (offset 1 in an interleaved record)
+rate    : 100 Hz
+samples : 60000
+
+  block  seq  first  samples       min         max      checksum  server
+# 
+ SERIAL  session closed
+Press any key to reconnect
+
+ Serial  Port opened
+Hypervisor support disabled
+MMU: 16-bit ASID 44-bit PA TCR_EL1=00000014b5183519
+GICv2: 256 interrupts
+GICv2: routing SPIs to gic cpu 0
+cpu0: MPIDR=0000000080000000
+cpu0: MIDR=410fd083 Cortex-A72 r0p3
+cpu0: DCZID_EL0=0x00000004 (64 bytes)
+cpu0: CWG=4 ERG=4 Dminline=4 Iminline=4 PIPT
+cpu0: CLIDR=a200023 LoUU=1 LoC=2 LoUIS=1
+cpu0: L1 Icache 48K linesz=64 set/way=256/3
+cpu0: L1 Dcache 32K linesz=64 set/way=256/2
+cpu0: L2 Unified 1024K linesz=64 set/way=1024/16
+cpu0: GICv2 cpu interface 0
+Loading IFS...done
+cpu1: MPIDR=0000000080000001
+cpu1: MIDR=410fd083 Cortex-A72 r0p3
+cpu1: DCZID_EL0=0x00000004 (64 bytes)
+cpu1: CWG=4 ERG=4 Dminline=4 Iminline=4 PIPT
+cpu1: CLIDR=a200023 LoUU=1 LoC=2 LoUIS=1
+cpu1: L1 Icache 48K linesz=64 set/way=256/3
+cpu1: L1 Dcache 32K linesz=64 set/way=256/2
+cpu1: L2 Unified 1024K linesz=64 set/way=1024/16
+cpu1: GICv2 cpu interface 1
+cpu2: MPIDR=0000000080000002
+cpu2: MIDR=410fd083 Cortex-A72 r0p3
+cpu2: DCZID_EL0=0x00000004 (64 bytes)
+cpu2: CWG=4 ERG=4 Dminline=4 Iminline=4 PIPT
+cpu2: CLIDR=a200023 LoUU=1 LoC=2 LoUIS=1
+cpu2: L1 Icache 48K linesz=64 set/way=256/3
+cpu2: L1 Dcache 32K linesz=64 set/way=256/2
+cpu2: L2 Unified 1024K linesz=64 set/way=1024/16
+cpu2: GICv2 cpu interface 2
+cpu3: MPIDR=0000000080000003
+cpu3: MIDR=410fd083 Cortex-A72 r0p3
+cpu3: DCZID_EL0=0x00000004 (64 bytes)
+cpu3: CWG=4 ERG=4 Dminline=4 Iminline=4 PIPT
+cpu3: CLIDR=a200023 LoUU=1 LoC=2 LoUIS=1
+cpu3: L1 Icache 48K linesz=64 set/way=256/3
+cpu3: L1 Dcache 32K linesz=64 set/way=256/2
+cpu3: L2 Unified 1024K linesz=64 set/way=1024/16
+cpu3: GICv2 cpu interface 3
+
+System page at phys:0000000000015000 user:ffffff8040208000 kern:ffffff8040204000
+Starting next program at vffffff8060075c80
+syspage::hypinfo::flags=0x00000000
+ 
+Welcome to QNX 8.0.0 on RaspberryPi4B !
+ 
+Starting wdtkick ...
+Starting I2C driver ...
+Starting PCI Server ...
+Starting serial driver (/dev/ser1)
+Starting SPI master driver ...
+Starting SDMMC driver (/dev/sd0)
+Path=0 - bcm2711
+ target=0 lun=0     Direct-Access(0) - SDMMC:       Rev: 1.0
+Inform vc to load vl805 firmware
+Starting USB xHCI controller in the host mode (/dev/usb/*)...
+Starting devf-ram filesystem ...
+Starting networking ...
+Starting DHCP client ...
+Starting SSH daemon ...
+/usr/libexec/sshd-auth does not exist or is not executable
+Starting devc-pty manager ...
+Starting qconn daemon ...
+Starting shell ...
+# cd /tmp/
+# te
+tee                 test_block_loader   test_protocol       
+test                test_mergesort      test_sensor         
+# test_mergesort 
+parallel merge sort tests (threshold, partitions, phases)
+  dataset: (not found -- payload tests will be skipped)
+
+  test_pool_lifecycle                  ok
+  test_argument_checks                 ok
+  test_small_inputs                    ok
+  test_parallel_sizes                  ok
+  test_sizes_just_above_the_threshold  ok
+  test_thread_count_invariance         ok
+  test_duplicate_values                ok
+  test_presorted_and_reversed          ok
+  test_float_extremes                  ok
+  test_repeated_sorts                  ok
+  test_stats_describe_the_plan         ok
+  SKIP: no payload directory: the real-data sort tests not run
+# pipeline_demo /data/bin/channels/r1_voltage.bin planar voltage 100 1
+file    : /data/bin/channels/r1_voltage.bin
+layout  : planar
+channel : voltage (offset 1 in an interleaved record)
+rate    : 100 Hz
+workers : 1
+samples : 60000
+
+  block  seq  samples         min      median         max   sort us   MiB/s  order
+  -----  ---  -------  ----------  ----------  ----------  --------  ------  -----
+      0    0    16384      3.5662      3.9618       4.274    2556.2   25.64  ok
+      1    1    16384       3.457      3.6416       3.871    2398.0   27.33  ok
+      2    2    16384      2.9529      3.3841      3.5868    2307.3   28.40  ok
+      3    3    10848      2.5978      2.9735      3.5662    1848.7   23.47  ok
+
+  blocks        : 4 (3 full 64 KiB, 1 short)
+  samples sorted: 60000
+  sort time     : 9.110 ms total, 2.278 ms per block
+  throughput    : 25.12 MiB/s, 6585970 samples/s
+  last block    : 1 partitions, 0 merge phases, 1 tasks, 1 workers
+  order checked : 4 of 4 blocks sorted
+# pipeline_demo /data/bin/channels/r1_voltage.bin planar voltage 100 2
+file    : /data/bin/channels/r1_voltage.bin
+layout  : planar
+channel : voltage (offset 1 in an interleaved record)
+rate    : 100 Hz
+workers : 2
+samples : 60000
+
+  block  seq  samples         min      median         max   sort us   MiB/s  order
+  -----  ---  -------  ----------  ----------  ----------  --------  ------  -----
+      0    0    16384      3.5662      3.9618       4.274    1434.2   45.70  ok
+      1    1    16384       3.457      3.6416       3.871    1266.5   51.74  ok
+      2    2    16384      2.9529      3.3841      3.5868    1240.6   52.82  ok
+      3    3    10848      2.5978      2.9735      3.5662    1071.1   40.51  ok
+
+  blocks        : 4 (3 full 64 KiB, 1 short)
+  samples sorted: 60000
+  sort time     : 5.012 ms total, 1.253 ms per block
+  throughput    : 45.66 MiB/s, 11970249 samples/s
+  last block    : 2 partitions, 1 merge phases, 3 tasks, 2 workers
+  order checked : 4 of 4 blocks sorted
+# pipeline_demo /data/bin/channels/r1_voltage.bin planar voltage 100 4
+file    : /data/bin/channels/r1_voltage.bin
+layout  : planar
+channel : voltage (offset 1 in an interleaved record)
+rate    : 100 Hz
+workers : 4
+samples : 60000
+
+  block  seq  samples         min      median         max   sort us   MiB/s  order
+  -----  ---  -------  ----------  ----------  ----------  --------  ------  -----
+      0    0    16384      3.5662      3.9618       4.274     907.4   72.22  ok
+      1    1    16384       3.457      3.6416       3.871     734.0   89.29  ok
+      2    2    16384      2.9529      3.3841      3.5868     734.1   89.27  ok
+      3    3    10848      2.5978      2.9735      3.5662     653.9   66.36  ok
+
+  blocks        : 4 (3 full 64 KiB, 1 short)
+  samples sorted: 60000
+  sort time     : 3.029 ms total, 0.757 ms per block
+  throughput    : 75.55 MiB/s, 19805981 samples/s
+  last block    : 4 partitions, 2 merge phases, 7 tasks, 4 workers
+  order checked : 4 of 4 blocks sorted

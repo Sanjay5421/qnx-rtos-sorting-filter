@@ -1,50 +1,362 @@
 % ---------------------------------------------------------------------------
-% content.tex — the preview deck (theme-independent)
+% content.tex — the slides
 %
-% Every colour and every piece of chrome comes from the theme; nothing here
-% names a colour or a font. This is the file the real slides will grow from.
+% Order: introduction, system overview, methodology, results, use cases.
+% Every colour, font and box comes from theme.tex; this file names none.
 %
-%   % 1  title slide          — theme's title page template
-%   % 2  layout preview       — text, bullets, table, callout
-%   % 3  layout preview       — boxes, code, diagram
-%   % 4  closing slide        — \closingSlide, overridable per theme
+% Diagrams are \input from diagrams.tex, on purpose: they are being drawn
+% separately, and each frame says so where it is still a placeholder.
 % ---------------------------------------------------------------------------
 
-% ===========================================================================
-% 1. Title slide
-% ===========================================================================
+% ==== 1. Title ==============================================================
 
 \begin{frame}[plain]
   \titlepage
 \end{frame}
 
+% ==== 2. Outline ============================================================
+
+\begin{frame}{Outline}
+  \vfill
+  \begin{columns}[c, onlytextwidth]
+    \begin{column}{0.48\textwidth}
+      \tableofcontents[sections={1-3}]
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \tableofcontents[sections={4-5}]
+    \end{column}
+  \end{columns}
+  \vfill
+\end{frame}
+
 % ===========================================================================
-% 2. Layout preview — text, table, code
-%
-% Every element the deck can use, so a theme can be judged at a glance.
-% Delete both preview slides once the section format is settled.
+\section{Introduction}
 % ===========================================================================
 
-\begin{frame}{Layout preview — text, table, code}
+\begin{frame}{The problem}
   \begin{columns}[t, onlytextwidth]
-    \begin{column}{0.50\textwidth}
-      {\color{rtmMuted}\scriptsize\bfseries SECTION HEADING}\par
-      \vskip1mm
+    \begin{column}{0.54\textwidth}
+      A client continuously offloads \concept{unsorted floating-point
+      time-series} metrics to a server. The server
       \begin{itemize}
-        \item First-level bullet with \concept{inline emphasis}
-        \item A second bullet, and a \num{42.7\%} figure in accent colour
-        \begin{itemize}
-          \item A sub-item, quieter than its parent
-        \end{itemize}
-        \item Third bullet, closing the list
+        \item sorts each block with a \concept{parallel merge sort},
+        \item removes sensor outliers with a \concept{rolling median},
+        \item and \concept{signals completion asynchronously}.
       \end{itemize}
       \vskip2mm
-      {\color{rtmMuted}\scriptsize\bfseries EMPHASIS}\par
-      \vskip1mm
-      Body text in the normal ink colour, sized for projection, and
-      \alert{alerted text} for something that must not be missed.
+      The client then collects the median and a memory-offset descriptor —
+      the two things the service exists to produce.
     \end{column}
+    \begin{column}{0.42\textwidth}
+      \begin{highlight}
+        \textbf{Why it is hard} \\
+        The workload arrives faster than it can be handled one sample at a
+        time, and the readings are corrupted by spikes that no average
+        survives.
+      \end{highlight}
+      \vskip2mm
+      \begin{tech}
+        \textbf{The rules} \\
+        Message passing only, a client--server split, a two-part IOV
+        transfer, a payload of at least 64 KB, and an asynchronous event.
+      \end{tech}
+    \end{column}
+  \end{columns}
+\end{frame}
 
+% ---------------------------------------------------------------------------
+\begin{frame}{Why a median, and not an average}
+  \begin{columns}[t, onlytextwidth]
+    \begin{column}{0.50\textwidth}
+      A sensor reading is one number in a stream. An outlier is a reading
+      that the sensor, or the wiring, invented.
+      \vskip2mm
+      \begin{center}
+      \begin{tabular}{@{}lccc@{}}
+        \toprule
+        \rtmtablehead{Window} & \rtmtablehead{Mean} & \rtmtablehead{Median} & \rtmtablehead{Truth} \\
+        \midrule
+        5, 5, 5, 5, 5   & 5.0  & 5.0 & 5 \\
+        5, 5, 5, 5, 50  & \num{14.0} & \num{5.0} & 5 \\
+        \bottomrule
+      \end{tabular}
+      \end{center}
+      \vskip2mm
+      One spike moves the mean by 9 V and the median not at all. That is the
+      entire argument.
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \begin{itemize}
+        \item The filter slides a window of neighbouring samples and takes
+              the middle value.
+        \item The window must be \concept{odd}, so a middle value exists.
+        \item It needs the signal in \concept{time order} — so it cannot run
+              on the buffer the sort has just reordered.
+      \end{itemize}
+      \vskip2mm
+      \begin{highlight}
+        On our payload the median removes the injected spikes outright;
+        what remains is the bias it leaves on a step or a ramp, which no
+        median can avoid.
+      \end{highlight}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{What we set out to build}
+  \begin{columns}[t, onlytextwidth]
+    \begin{column}{0.46\textwidth}
+      \begin{tech}
+        \textbf{Protocol first} \\
+        The message definition was written before any QNX code: it fixes the
+        contract the sort, the filter and the IPC must all satisfy, and it
+        can be proved correct on the host.
+      \end{tech}
+      \vskip2mm
+      \begin{tech}
+        \textbf{Prove it off the board} \\
+        Every stage that does not need the kernel is tested on Windows
+        first. The board is the last step, not the debugging loop.
+      \end{tech}
+    \end{column}
+    \begin{column}{0.50\textwidth}
+      \begin{itemize}
+        \item \concept{64 KiB is the unit of work} — 16\,384 float32 samples,
+              so the size requirement is met with no padding.
+        \item \concept{Deterministic output} — the answer must not depend on
+              how many threads the machine happened to run.
+        \item \concept{Honest measurement} — timings and checksums come off
+              the Raspberry Pi 4, not off a desktop.
+      \end{itemize}
+      \vskip2mm
+      \key{Sort, filter, notify — and show the evidence}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===========================================================================
+\section{System Overview}
+% ===========================================================================
+
+\systemOverviewSlide
+
+% ---------------------------------------------------------------------------
+\clientFlowchartSlide
+
+% ---------------------------------------------------------------------------
+\serverFlowchartSlide
+
+% ---------------------------------------------------------------------------
+\begin{frame}{The two programs}
+  \begin{columns}[t, onlytextwidth]
+    \begin{column}{0.47\textwidth}
+      \begin{highlight}
+        \textbf{Client — the offload side}
+      \end{highlight}
+      \vskip1mm
+      \begin{itemize}
+        \item Connects by \concept{name only} (\texttt{name\_open}), retrying
+              to a 10-second deadline rather than hanging.
+        \item Replays a recording, assembles blocks, sends each as a two-part
+              IOV.
+        \item Owns its own connection, which is why the event can reach it
+              later.
+      \end{itemize}
+    \end{column}
+    \begin{column}{0.49\textwidth}
+      \begin{highlight}
+        \textbf{Server — the compute side}
+      \end{highlight}
+      \vskip1mm
+      \begin{itemize}
+        \item \texttt{name\_attach} registers the name; the receive loop
+              never blocks on a sort.
+        \item Validates the descriptor, verifies the checksum, replies with
+              the ack, and only then queues the job.
+        \item Raises the event with a pulse and answers the fetch with the
+              median and the offset descriptor.
+      \end{itemize}
+    \end{column}
+  \end{columns}
+  \vskip2mm
+  \key{The ack says "accepted"; the pulse says "done"; the fetch carries the answer}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{The message definition}
+  \begin{columns}[t, onlytextwidth]
+    \begin{column}{0.52\textwidth}
+      \begin{table}
+        \centering
+        \begin{tabular}{@{}ll@{}}
+          \toprule
+          \rtmtablehead{Message} & \rtmtablehead{Purpose} \\
+          \midrule
+          \texttt{SUBMIT}  & header + 64 KiB block, two IOV parts \\
+          \texttt{ACK}     & accepted, or why not \\
+          \texttt{FETCH}   & asks for the result of a job \\
+          \texttt{RESULT}  & median + offset descriptor \\
+          \texttt{PULSE}   & asynchronous completion, code 16 \\
+          \bottomrule
+        \end{tabular}
+      \end{table}
+      \vskip1mm
+      \begin{tech}
+        The block is a type, not a convention: a static assertion pins it to
+        exactly 65\,536 bytes. The descriptor travels beside it, so the server
+        reads 48 bytes before pulling 64 KiB.
+      \end{tech}
+    \end{column}
+    \begin{column}{0.44\textwidth}
+      \begin{itemize}
+        \item \concept{Checksum covers only the declared samples.} A short
+              final block's unused tail would otherwise be checksummed.
+        \item \concept{Message types start at 0x1000}, clear of the QNX system
+              range, re-checked wherever the QNX headers are visible.
+        \item \concept{Types are asserted at offset zero} — the kernel
+              dispatches on the first two bytes.
+      \end{itemize}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\dataFlowSlide
+
+% ---------------------------------------------------------------------------
+\begin{frame}{One recording, two file layouts}
+  \begin{columns}[t, onlytextwidth]
+    \begin{column}{0.48\textwidth}
+      \begin{table}
+        \centering
+        \begin{tabular}{@{}lll@{}}
+          \toprule
+          \rtmtablehead{Layout} & \rtmtablehead{Stride} & \rtmtablehead{Size} \\
+          \midrule
+          Planar      & 1 float  & 240\,000 B \\
+          Interleaved & 4 floats & 960\,000 B \\
+          \bottomrule
+        \end{tabular}
+      \end{table}
+      \vskip1mm
+      \begin{tech}
+        \textbf{One code path.} A sample is read at
+        \texttt{window[(i - first) * stride + offset]}, so a planar file is
+        \texttt{\{0, 1\}} and an interleaved record is \texttt{\{k, 4\}}.
+        Neither the loader nor the client knows which it was given.
+      \end{tech}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \begin{warn}
+        \textbf{The trap.} The interleaved file stores
+        \texttt{time, voltage, current, temperature}, while the protocol
+        enumerates \texttt{time, current, voltage, temperature}. Voltage is
+        field \textbf{1}, not 2. The mapping lives in exactly one function.
+      \end{warn}
+      \vskip2mm
+      \begin{highlight}
+        Both layouts are carried on purpose: they are different access
+        patterns that disagree in field order, and a test asserts they
+        produce \concept{byte-identical blocks}.
+      \end{highlight}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{Sorting a block with four workers}
+  \begin{columns}[t, onlytextwidth]
+    \begin{column}{0.47\textwidth}
+      \begin{itemize}
+        \item \textbf{Phase 0} — each worker sorts one partition into the
+              scratch buffer.
+        \item \textbf{Merge phases} — pairs of runs are merged until one run
+              covers the array.
+        \item A merge reads two runs the previous phase produced, so the
+              phase boundary is a \concept{real barrier}: one mutex, a
+              work-ready and a phase-done condition variable.
+        \item Nothing is ordered by a sleep, so a slow machine cannot
+              produce a different answer.
+      \end{itemize}
+    \end{column}
+    \begin{column}{0.49\textwidth}
+      \begin{tech}
+        \textbf{Deterministic by construction} \\
+        The merge takes from the left run on ties, so equal values keep
+        their order and the output is bit-identical for 1, 2, 3, 5 and 8
+        threads.
+      \end{tech}
+      \vskip2mm
+      \begin{tech}
+        \textbf{One allocation per sort} \\
+        A single scratch buffer is ping-ponged between phases. Inputs below
+        4096 values take the serial path, where a pool costs more than it
+        saves.
+      \end{tech}
+      \vskip2mm
+      \key{4 partitions \textbullet{} 2 merge phases \textbullet{} 7 tasks}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===========================================================================
+\section{Methodology}
+% ===========================================================================
+
+\begin{frame}{How it was built}
+  \begin{columns}[t, onlytextwidth]
+    \begin{column}{0.47\textwidth}
+      {\color{rtmMuted}\ttfamily\scriptsize\bfseries THE ORDER OF WORK}\par
+      \vskip2mm
+      \begin{enumerate}
+        \item \concept{Protocol} — the interface both sides compile
+              against, proved on the host before any kernel code.
+        \item \concept{Sensor} — replay a recording like a device, in
+              frames, on its own clock.
+        \item \concept{Block loader} — turn the stream into 64 KiB blocks
+              with descriptors.
+        \item \concept{Merge sort} — the parallel phase machinery, measured
+              against \texttt{qsort}.
+        \item \concept{Image} — cross-compile, pack, boot, run.
+      \end{enumerate}
+    \end{column}
+    \begin{column}{0.49\textwidth}
+      \begin{tech}
+        \textbf{Five programs, one library} \\
+        \texttt{sensor.c}, \texttt{protocol.c}, \texttt{block\_loader.c} and
+        \texttt{mergesort.c} are linked into every binary — the tests and
+        the demos exercise the same code the service will run.
+      \end{tech}
+      \vskip2mm
+      \begin{tech}
+        \textbf{Host build, target build, one source} \\
+        \texttt{-std=c99 -Wall -Wextra -pedantic} clean on both. The only
+        platform-dependent file is the sensor's clock and sleep, behind one
+        \texttt{\#if defined(\_WIN32)}.
+      \end{tech}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{Where the client's data comes from}
+  \begin{columns}[t, onlytextwidth]
+    \begin{column}{0.50\textwidth}
+      The workload is synthesised offline, so it can be replayed at
+      realistic volume with a \concept{known ground truth}.
+      \vskip2mm
+      \begin{itemize}
+        \item Three PyBaMM simulations — one LG M50 cell discharged at
+              0.5C, 1C and 2C.
+        \item Three channels at 100 Hz: current, terminal voltage, cell
+              temperature.
+        \item Corrupted by additive white Gaussian noise plus
+              \concept{impulsive outliers} — spikes, bursts and dropouts.
+        \item The injected mask is kept on the host: the answer key, not a
+              detector's output.
+      \end{itemize}
+    \end{column}
     \begin{column}{0.46\textwidth}
       \begin{table}
         \centering
@@ -52,63 +364,337 @@
           \toprule
           \rtmtablehead{Quantity} & \rtmtablehead{Value} \\
           \midrule
-          First row   & 1 \\
-          Second row  & 2 \\
-          Third row   & \num{3} \\
+          Recordings            & 3 \\
+          Samples per recording & 60\,000 \\
+          Channels              & 4 \\
+          Payload               & 6.2 MiB \\
+          Corrupted cells       & 8\,040 \\
+          Corruption rate       & \num{1.489\%} \\
           \bottomrule
         \end{tabular}
       \end{table}
       \vskip1mm
       \begin{highlight}
-        \textbf{Highlight box} — accent rule, for a point worth remembering.
+        Noise is seeded, so regenerating reproduces the dataset exactly.
       \end{highlight}
     \end{column}
   \end{columns}
-  \themeSignature
 \end{frame}
 
 % ---------------------------------------------------------------------------
-\begin{frame}[fragile]{Layout preview — boxes, code, diagram}
+\begin{frame}{The test suite}
   \begin{columns}[t, onlytextwidth]
-    \begin{column}{0.48\textwidth}
-      \begin{tech}
-        \textbf{Technical box} — primary rule, for an implementation note.
-      \end{tech}
-      \vskip2mm
-      \begin{warn}
-        \textbf{Warning box} — alert rule, for a caveat or a risk.
-      \end{warn}
-      \vskip3mm
-      \key{Pill: one line, the slide's takeaway}
-    \end{column}
-
     \begin{column}{0.50\textwidth}
-\begin{lstlisting}[numbers=left]
-/* Code block --- monospaced, */
-int example(int n)   /* numbers optional */
-{
-    return n * n;
-}
-\end{lstlisting}
+      \begin{table}
+        \centering
+        \begin{tabular}{@{}lrr@{}}
+          \toprule
+          \rtmtablehead{Suite} & \rtmtablehead{Tests} & \rtmtablehead{Checks} \\
+          \midrule
+          \texttt{test\_sensor}       & 15 & 642 \\
+          \texttt{test\_protocol}     &  9 &  82 \\
+          \texttt{test\_block\_loader}&  8 & 116 \\
+          \texttt{test\_mergesort}    & 13 & 578 \\
+          \midrule
+          \rtmtablehead{Total} & \rtmtablehead{45} & \num{1418} \\
+          \bottomrule
+        \end{tabular}
+      \end{table}
       \vskip1mm
-      \begin{center}
-      \begin{tikzpicture}[node distance=6mm and 5mm]
-        \node[accent block] (a) {Start};
-        \node[block, right=of a] (b) {Step};
-        \node[muted block, right=of b] (c) {End};
-        \draw[flow] (a) -- (b);
-        \draw[flow dashed] (b) -- (c);
-      \end{tikzpicture}
-      \end{center}
+      {\scriptsize The same binaries build for the host and for
+       \texttt{aarch64le}, so the suite runs in both places unchanged.}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \begin{itemize}
+        \item \concept{Boundaries} — sizes around the 4096 threshold, the
+              partition boundaries, every size from 0 to 64.
+        \item \concept{Float extremes} — $\pm$0.0, denormals,
+              \texttt{FLT\_MIN}, \texttt{FLT\_MAX}, and no NaN anywhere in the
+              payload.
+        \item \concept{Determinism} — bit-identical output for 1 to 8
+              threads; one changed sample must be caught.
+        \item \concept{Real payload} — every block against \texttt{qsort},
+              and the two layouts against each other.
+      \end{itemize}
     \end{column}
   \end{columns}
-  \themeSignature
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{From source to a booting board}
+  \begin{columns}[t, onlytextwidth]
+    \begin{column}{0.50\textwidth}
+      \begin{enumerate}
+        \item \texttt{app/Makefile} cross-compiles every program for
+              \texttt{aarch64le} with
+              \texttt{qcc -Vgcc\_ntoaarch64le}.
+        \item \texttt{make install} places the binaries and the payload in
+              the BSP's install tree.
+        \item \texttt{images/rpi4.build} names them for the image: seven
+              programs into \texttt{/bin}, the payload into \texttt{/data}.
+        \item \texttt{mkifs} produces \texttt{ifs-rpi4.bin}; the card
+              boots it with \texttt{kernel=ifs-rpi4.bin}.
+      \end{enumerate}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \begin{highlight}
+        \textbf{Nothing is mounted, nothing is copied} \\
+        The programs and their data live inside the image, so a board run
+        can never pick up a stale payload — it is the image or nothing.
+      \end{highlight}
+      \vskip2mm
+      \begin{tech}
+        \textbf{The payload is optional by design} \\
+        Those build entries are marked optional, so a checkout without the
+        generated dataset still builds a bootable image — its payload tests
+        report skipped rather than failed. We saw both cases on the board.
+      \end{tech}
+    \end{column}
+  \end{columns}
 \end{frame}
 
 % ===========================================================================
-% 3. Closing slide
+\section{Results}
 % ===========================================================================
 
+\begin{frame}{The board}
+  \begin{columns}[c, onlytextwidth]
+    \begin{column}{0.48\textwidth}
+      \begin{tech}
+        \textbf{Target} \\
+        Raspberry Pi 4 Model B, four Cortex-A72 cores, booting QNX 8.0.0 from
+        an SD card and driven over a serial console. No network dependency
+        for any test, which keeps the measurements repeatable.
+      \end{tech}
+    \end{column}
+    \begin{column}{0.50\textwidth}
+      \boardPhoto
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{Console: the board comes up}
+  \columnsimage{boot}{0.5}{Boot to a shell. All four Cortex-A72 cores are
+    brought up by \texttt{procnto-smp-instr}, the SD card is mounted, and the
+    shell prompt appears — the point from which every measurement was taken.}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{Console: the protocol layer}
+  \columnsimage{protocol}{0.5}{\texttt{test\_protocol} — 82 checks, none
+    failed. The 64 KiB block size, the message-type range, the pulse code, the
+    field layout and the checksum are all pinned here, and they hold and pass
+    on the target exactly as they do on the host.}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{Console: the virtual sensor}
+  \columnsimage{sensor}{0.5}{\texttt{test\_sensor /data} — 642 checks, none
+    failed. The lines above the \texttt{ok} column are the module reporting
+    every rejected argument by name: a missing file, an unknown layout, an
+    offset outside the stride, a file that is not a whole number of records.}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{Console: the block loader}
+  \columnsimage{loader}{0.5}{\texttt{test\_block\_loader /data} — 116 checks,
+    none failed. This is the suite that proves the planar and interleaved
+    routes produce byte-identical blocks and descriptors, and that a single
+    changed sample is detected.}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{Console: the payload is intact, in both layouts}
+  \columnsimage{cksum}{0.5}{\texttt{cksum} of both payload files inside the
+    image, then \texttt{loader\_demo} in each layout. The four block checksums
+    printed by the planar run and by the interleaved run are the same four
+    values — the two file layouts produce identical blocks, on the target.}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{Console: the sensor replaying a recording}
+  \columnsimage{sensor-demo}{0.5}{\texttt{sensor\_demo} paced at 10 Hz — one
+    sample at a time, on the sensor's own clock, from the payload inside the
+    image. It then streams the whole recording: 60\,000 samples in four
+    blocks, with min, max and mean over the run.}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{Console: the merge sort on real data}
+  \columnsimage{mergesort}{0.5}{This board came up \emph{without} the payload
+    in its image, so the eleven unit tests ran and the two real-data tests
+    reported skipped — 535 checks, 1 skipped, nothing failed. The skip line is
+    the suite telling the truth rather than the image failing.}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{Console: sorting the payload, four workers deep}
+  \columnsimage{pipeline4}{0.5}{\texttt{pipeline\_demo} with four workers.
+    Each 64 KiB block is sorted, the median and range are taken from the
+    sorted block, and the last line reports the plan: \textbf{4 partitions,
+    2 merge phases, 7 tasks, 4 workers}. The plan changing shape with the
+    worker count is what shows the parallel path is doing the work.}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{Console: the worker sweep}
+  \columnsimage{sweep}{0.5}{The same recording at one, two and four workers.
+    Per block: \textbf{2.278 ms} $\rightarrow$ \textbf{1.253 ms}
+    $\rightarrow$ \textbf{0.757 ms}, which is
+    \num{3.01$\times$} on four cores. The medians, ranges and order verdicts
+    are identical in all three runs — only the time moves.}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{Console: both on-disk layouts, through the pipeline}
+  \columnsimage{layouts}{0.5}{The planar and interleaved recordings through
+    the same command. \num{0.755} ms per block against \num{0.741} ms — the
+    two layouts are the same signal, so the difference is run-to-run noise,
+    and the medians and ranges match to the digit.}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{What the numbers say}
+  \begin{columns}[t, onlytextwidth]
+    \begin{column}{0.50\textwidth}
+      \begin{table}
+        \centering
+        \begin{tabular}{@{}rrrr@{}}
+          \toprule
+          \rtmtablehead{W} & \rtmtablehead{ms/block} & \rtmtablehead{MiB/s} & \rtmtablehead{Speed-up} \\
+          \midrule
+          1 & 2.278 & 25.12 & 1.00$\times$ \\
+          2 & 1.253 & 45.66 & 1.82$\times$ \\
+          4 & \num{0.757} & \num{75.55} & \num{3.01$\times$} \\
+          \bottomrule
+        \end{tabular}
+      \end{table}
+      \vskip1mm
+      {\scriptsize One 64 KiB block, 60\,000-sample recording, measured on
+       the board.}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \begin{highlight}
+        \textbf{Headroom} \\
+        One block is 163.84 s of signal at 100 Hz and is sorted in 0.757 ms
+        — about \num{216\,000$\times$} real time.
+      \end{highlight}
+      \vskip2mm
+      \begin{itemize}
+        \item The plan line is fixed by $n$ and the worker count, so it must
+              read the same on any machine — and it does.
+        \item \concept{Determinism}: 4 partitions and 2 merge phases every
+              run, with the same checksums.
+      \end{itemize}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{What did not work, and what it cost}
+  \begin{columns}[t, onlytextwidth]
+    \begin{column}{0.48\textwidth}
+      \begin{warn}
+        \textbf{The channel-order trap} \\
+        The interleaved file's field order differs from the protocol's
+        enumeration. Sorting field 2 of each record instead of field 1 would
+        have sorted current and called it voltage — silently.
+      \end{warn}
+      \vskip2mm
+      \begin{warn}
+        \textbf{A payload-less image} \\
+        Built without the dataset, the image still boots and the suites still
+        run; the two real-data tests report skipped. It is a build
+        configuration, not a failure — but it has to be read correctly.
+      \end{warn}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \begin{tech}
+        \textbf{Distrust inherited from the dataset} \\
+        The outlier flags in the dataset are the \emph{injected} mask, not a
+        detector's output. Nothing in this service claims to have found an
+        outlier by looking at the data.
+      \end{tech}
+      \vskip2mm
+      \begin{tech}
+        \textbf{What is still open} \\
+        The two programs that talk, and the filter between them. The
+        protocol half of the notification is written and tested; the wiring
+        is not.
+      \end{tech}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===========================================================================
+\section{Use Cases and Closing}
+% ===========================================================================
+
+\begin{frame}{Where this applies}
+  \begin{columns}[t, onlytextwidth]
+    \begin{column}{0.48\textwidth}
+      \begin{itemize}
+        \item \concept{Battery management} — the workload came from battery
+              recordings: continuous voltage and current, where spikes are
+              measurement artefacts and the median is the part that survives.
+        \item \concept{Industrial telemetry} — a plant's sensors stream faster
+              than a control loop can afford to sort; offloading to a worker
+              pool keeps the collector simple.
+        \item \concept{Edge gateways} — a Pi-class board on a real-time kernel
+              can sort and clean a channel's history on demand.
+      \end{itemize}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \begin{itemize}
+        \item \concept{Automotive logging} — bursty diagnostic data, where a
+              fixed 64 KiB unit and a checksum travel well over a message bus.
+        \item \concept{Flight and plant recorders} — the same shape: a time
+              series that must be summarised, and an answer that must be
+              provably the same every time it is computed.
+      \end{itemize}
+      \vskip2mm
+      \begin{highlight}
+        The pattern generalises to any stream where the work is a
+        \textbf{fixed-size unit} and the answer must be \textbf{reproducible}.
+      \end{highlight}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{Summary}
+  \begin{columns}[t, onlytextwidth]
+    \begin{column}{0.48\textwidth}
+      \begin{itemize}
+        \item The unit of work is a \concept{64 KiB block with a descriptor},
+              never a whole file.
+        \item The sort is parallel, stable and \concept{deterministic} — the
+              answer does not depend on the machine.
+        \item \concept{3.01$\times$} on four cores, 216\,000$\times$ real
+              time, measured on the board.
+        \item \concept{Pulse for the event, fetch for the payload} — the
+              client never polls.
+      \end{itemize}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \begin{itemize}
+        \item Everything that does not need the kernel is tested off the
+              board first: \num{1418} checks, clean on host and target.
+        \item Checksums are the same across the two file layouts and across
+              machines, which is what makes the evidence comparable.
+        \item Next: the client and the server talking, and the median filter
+              between them.
+      \end{itemize}
+      \vskip3mm
+      \begin{center}
+        {\color{rtmPrimary}\large\bfseries Questions?}
+      \end{center}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
 \closingSlide
 
 \end{document}
