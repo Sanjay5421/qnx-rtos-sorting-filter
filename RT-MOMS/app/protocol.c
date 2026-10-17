@@ -5,12 +5,14 @@
  * checksum, the validation the server performs on an incoming submit, and the
  * names used in log output.
  *
- * Deliberately dependency-free, so the same code runs in the server on the
+ * Deliberately free of QNX headers, so the same code runs in the server on the
  * target and in the host tests, which is what lets the validation logic be
- * tested before any QNX code exists.
+ * tested before any QNX code exists. The only project include beyond its own
+ * header is median.h, for the width rule the submit message carries.
  */
 
 #include "protocol.h"
+#include "median.h"
 
 #include <string.h>
 
@@ -63,6 +65,10 @@ int proto_submit_valid(const proto_submit_t *msg)
      * have, so the submit is refused rather than quietly treated as ordinary. */
     if ((msg->flags & ~PROTO_SUBMIT_FLAGS_KNOWN) != 0)
         return 0;
+    /* The filter width is the client's request for this job, so it must be a
+     * width the filter can run: odd, MEDIAN_MIN_WIDTH..MEDIAN_MAX_WIDTH. */
+    if (!median_width_valid(msg->filter_width))
+        return 0;
     return proto_block_desc_valid(&msg->desc);
 }
 
@@ -85,15 +91,16 @@ int proto_submit_verify(const proto_submit_t *msg, const proto_block_t *block)
 }
 
 void proto_submit_prepare(proto_submit_t *msg, uint32_t job_id,
-                          const proto_block_desc_t *desc)
+                          const proto_block_desc_t *desc, uint32_t filter_width)
 {
     if (msg == NULL)
         return;
 
     memset(msg, 0, sizeof(*msg));      /* no stale padding on the wire */
-    msg->type    = (uint16_t)PROTO_MSG_SUBMIT;
-    msg->version = (uint16_t)PROTO_VERSION;
-    msg->job_id  = job_id;
+    msg->type         = (uint16_t)PROTO_MSG_SUBMIT;
+    msg->version      = (uint16_t)PROTO_VERSION;
+    msg->job_id       = job_id;
+    msg->filter_width = filter_width;
 
     if (desc != NULL)
         msg->desc = *desc;

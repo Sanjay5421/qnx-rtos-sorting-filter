@@ -73,6 +73,20 @@ void median_config_default(median_config_t *cfg);
 int median_config_valid(const median_config_t *cfg);
 
 /*
+ * Is this a usable window width: odd, MEDIAN_MIN_WIDTH..MEDIAN_MAX_WIDTH?
+ * The one place that rule lives, so the filter, the message validation and the
+ * command-line front ends cannot drift apart.
+ */
+int median_width_valid(uint32_t width);
+
+/*
+ * Parse a decimal width: digits only, no sign, no trailing characters, and the
+ * value must pass median_width_valid(). Returns 0 and stores the width on
+ * success, -1 on failure, leaving *width untouched.
+ */
+int median_width_parse(const char *text, uint32_t *width);
+
+/*
  * Filter one block of `n` time-ordered samples.
  *
  *   left / nleft    the nleft samples that immediately PRECEDE cur[0]

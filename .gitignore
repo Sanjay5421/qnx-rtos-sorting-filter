@@ -14,9 +14,6 @@ pi_data/
 data/artifacts/dataset/
 /.metadata/
 
-# Local planning notes — working scratch, not part of the deliverable
-/milestones-draft.md
-
 # Build outputs of RT-MOMS/tests. The .exe rule covers host builds; the bare
 # names would be produced by a target or Linux build with the same Makefile, and
 # .arm by the cross-compile step in REPRODUCE.md section 7.

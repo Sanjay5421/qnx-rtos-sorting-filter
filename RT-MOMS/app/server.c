@@ -1,9 +1,14 @@
 /*
  * QNX server for the M3 block service.
  *
- * Run on the target as: sortmed-server
+ * Run on the target as: sortmed-server [-t workers]
  * The server owns /sortmed-results and the "sortmed" message service.
  * A single client at a time is supported by the project protocol.
+ *
+ * The rolling-filter width is not a server option: it travels in each submit
+ * (proto_submit_t.filter_width), so one server can answer a sweep of widths
+ * without being restarted. What is a server setting is the size of the merge
+ * pool, because that is a resource the whole service shares.
  */
 #include "protocol.h"
 #include "mergesort.h"
@@ -22,11 +27,24 @@
 #define SERVER_NAME "sortmed"
 #define CLIENT_NAME "sortmed-client"
 
+/*
+ * The per-block stage times, filled in by process_submit(). They are printed
+ * after the completion pulse has gone out, so the console write never sits on
+ * the measured path, and they are what the report's stage budget is made of.
+ */
+typedef struct {
+    uint64_t copy_ns;    /* memcpy of the block into its slot                 */
+    uint64_t sort_ns;    /* ms_sort(): the parallel merge sort                */
+    uint64_t filter_ns;  /* median_filter_block(): the rolling Hampel filter  */
+    uint64_t sum_ns;     /* medians, both FNV-1a checksums, result fields     */
+} stage_times_t;
+
 typedef struct {
     int used;
     uint32_t job_id;
     unsigned slot;
     proto_result_t result;
+    stage_times_t stages;
 } job_entry_t;
 
 static uint64_t now_ns(void)
@@ -72,12 +90,18 @@ static size_t   run_samples;
 static unsigned run_jobs;
 static uint64_t run_elapsed_ns;
 
-/* Job ids restart at 1 for every client run, which is where a run begins. */
+/* Job ids restart at 1 for every client run, which is where a run begins.
+ * run_index counts those runs since the server started: it numbers the perf
+ * lines, which is what lets the host-side scorer attribute a block to the
+ * sweep case -- one client run -- that asked for it. */
+static unsigned run_index;
+
 static void run_reset(void)
 {
     run_samples = 0;
     run_jobs = 0;
     run_elapsed_ns = 0;
+    run_index++;
 }
 
 /*
@@ -139,7 +163,21 @@ static int process_submit(shm_region_t *region, mergesort_pool_t *pool,
     uint32_t outliers = 0;
     size_t n = msg->desc.samples;
     uint64_t start = now_ns();
+    uint64_t t0, t1;
     unsigned i = job->slot;
+
+    /*
+     * The width the client asked for. proto_submit_valid() has already
+     * checked it, so this can only fail if the two sides disagree about what
+     * a usable width is -- which is exactly when a refusal is right.
+     */
+    median_config_default(&cfg);
+    cfg.width = msg->filter_width;
+    if (!median_config_valid(&cfg)) {
+        fprintf(stderr, "sortmed-server: job %u asks for an unusable filter "
+                        "width %u\n", msg->job_id, msg->filter_width);
+        return -1;
+    }
 
     slot = (proto_shm_slot_t *)(base + PROTO_SHM_SLOT_BASE(i));
     sorted = (float *)(void *)(base + PROTO_SHM_SORTED_OFFSET(i));
@@ -151,14 +189,24 @@ static int process_submit(shm_region_t *region, mergesort_pool_t *pool,
     slot->reserved = 0;
 
     /* Keep the time-ordered input untouched for the rolling filter. */
+    t0 = now_ns();
     memcpy(sorted, block->samples, n * sizeof(float));
-    if (ms_sort(pool, sorted, n) != 0) return -1;
+    t1 = now_ns();
+    job->stages.copy_ns = t1 - t0;
 
-    median_config_default(&cfg);
+    t0 = now_ns();
+    if (ms_sort(pool, sorted, n) != 0) return -1;
+    t1 = now_ns();
+    job->stages.sort_ns = t1 - t0;
+
+    t0 = now_ns();
     if (median_filter_block(&cfg, NULL, 0, block->samples, n, NULL, 0,
                             filtered, &outliers) != 0)
         return -1;
+    t1 = now_ns();
+    job->stages.filter_ns = t1 - t0;
 
+    t0 = now_ns();
     job->result.type = PROTO_MSG_RESULT;
     job->result.status = PROTO_OK;
     job->result.job_id = msg->job_id;
@@ -170,26 +218,70 @@ static int process_submit(shm_region_t *region, mergesort_pool_t *pool,
     job->result.length = (uint32_t)n;
     job->result.sorted_checksum = proto_checksum(sorted, n * sizeof(float));
     job->result.filtered_checksum = proto_checksum(filtered, n * sizeof(float));
-    job->result.elapsed_ns = now_ns() - start;
+    t1 = now_ns();
+    job->stages.sum_ns = t1 - t0;
+
+    /* The server's own processing time for this block: the four stages above,
+     * measured from the top of the function. The run total adds the merges. */
+    job->result.elapsed_ns = t1 - start;
 
     /* Publish metadata last so a client never treats partial arrays as ready. */
     slot->state = PROTO_SLOT_WRITTEN;
     return 0;
 }
 
-int main(void)
+static void usage(FILE *out, const char *program)
+{
+    fprintf(out, "usage: %s [-t workers] [-h]\n"
+                 "  -t workers  merge-sort worker threads, 1..%u (default 4)\n"
+                 "              the rolling-filter width is not an option: it\n"
+                 "              arrives with each submit, so one server can\n"
+                 "              answer a sweep of widths\n",
+            program, (unsigned)MS_MAX_THREADS);
+}
+
+int main(int argc, char **argv)
 {
     name_attach_t *attach;
     shm_region_t region;
     mergesort_pool_t *pool;
     mergesort_options_t sort_options;
     job_entry_t jobs[PROTO_SHM_SLOTS];
+    unsigned threads = 4;              /* the target board's four cores */
+    int arg;
+
+    for (arg = 1; arg < argc; ++arg) {
+        if (strcmp(argv[arg], "-t") == 0 && arg + 1 < argc) {
+            unsigned long value;
+            char *end;
+
+            errno = 0;
+            value = strtoul(argv[arg + 1], &end, 10);
+            if (errno != 0 || argv[arg + 1][0] == '\0' || *end != '\0' ||
+                value < 1 || value > MS_MAX_THREADS) {
+                fprintf(stderr, "sortmed-server: -t wants 1..%u workers, "
+                                "not '%s'\n",
+                        (unsigned)MS_MAX_THREADS, argv[arg + 1]);
+                return EXIT_FAILURE;
+            }
+            threads = (unsigned)value;
+            ++arg;
+        } else if (strcmp(argv[arg], "-h") == 0) {
+            usage(stdout, argv[0]);
+            return EXIT_SUCCESS;
+        } else {
+            fprintf(stderr, "sortmed-server: unknown argument '%s'\n",
+                    argv[arg]);
+            usage(stderr, argv[0]);
+            return EXIT_FAILURE;
+        }
+    }
 
     memset(jobs, 0, sizeof(jobs));
     if (shm_region_create(&region) != 0) return EXIT_FAILURE;
 
     mergesort_options_default(&sort_options);
-    sort_options.threads = 4;
+    sort_options.threads = threads;
     pool = ms_pool_create(&sort_options);
     if (pool == NULL) {
         shm_region_close(&region);
@@ -205,6 +297,10 @@ int main(void)
     }
     printf("sortmed-server: service '%s' ready; shm=%s (%u bytes)\n",
            SERVER_NAME, PROTO_SHM_NAME, (unsigned)PROTO_SHM_BYTES);
+    printf("sortmed-server: %u merge workers; filter width per job, default %u, "
+           "threshold %.1f sigma\n",
+           ms_pool_threads(pool), (unsigned)MEDIAN_DEFAULT_WIDTH,
+           (double)MEDIAN_DEFAULT_THRESHOLD);
     fflush(stdout);
 
     for (;;) {
@@ -235,6 +331,10 @@ int main(void)
             proto_ack_t ack;
             int free_index;
             unsigned j;
+            uint64_t job_start;
+            uint64_t job_total_ns = 0;
+            uint64_t merge_ns = 0;
+            uint64_t publish_ns = 0;
             memset(&ack, 0, sizeof(ack));
             ack.type = PROTO_MSG_ACK;
             ack.job_id = submit.job_id;
@@ -288,6 +388,7 @@ int main(void)
                 continue;
             }
 
+            job_start = now_ns();
             if (process_submit(&region, pool, &submit, &block,
                                &jobs[free_index]) != 0) {
                 jobs[free_index].result.type = PROTO_MSG_RESULT;
@@ -306,16 +407,22 @@ int main(void)
 
                 run_elapsed_ns += jobs[free_index].result.elapsed_ns;
                 run_merge_block(sorted, submit.desc.samples);
-                run_elapsed_ns += now_ns() - merge_start;
+                merge_ns = now_ns() - merge_start;
+                run_elapsed_ns += merge_ns;
 
                 /*
                  * The recording's last block: the global median is known, so
                  * publish the run descriptor and the sorted array it points at.
                  * The pulse below carries that same median.
                  */
-                if ((submit.flags & PROTO_SUBMIT_LAST) != 0)
+                if ((submit.flags & PROTO_SUBMIT_LAST) != 0) {
+                    uint64_t publish_start = now_ns();
+
                     run_publish(&region);
+                    publish_ns = now_ns() - publish_start;
+                }
             }
+            job_total_ns = now_ns() - job_start;
 
             /*
              * Resolve the client for every job: each run of the client registers
@@ -347,6 +454,32 @@ int main(void)
                 }
                 if (coid != -1)
                     name_close(coid);
+            }
+
+            /*
+             * One machine-readable line per block, printed after the pulse so
+             * the console write is never on the measured path. The four stages
+             * were timed inside process_submit(); merge and publish here;
+             * `total` is the whole job as the server saw it. tools/filter_sweep.py
+             * reads these lines, and `run` (job 1 opens a run) is how it
+             * attributes a block to the sweep case that asked for it.
+             */
+            if (jobs[free_index].result.status == PROTO_OK) {
+                printf("perf: run=%u job=%u channel=%s width=%u samples=%u "
+                       "seq=%u copy=%llu sort=%llu filter=%llu sum=%llu "
+                       "merge=%llu publish=%llu total=%llu\n",
+                       run_index, submit.job_id,
+                       proto_channel_str(submit.desc.channel),
+                       submit.filter_width, (unsigned)submit.desc.samples,
+                       submit.desc.sequence,
+                       (unsigned long long)jobs[free_index].stages.copy_ns,
+                       (unsigned long long)jobs[free_index].stages.sort_ns,
+                       (unsigned long long)jobs[free_index].stages.filter_ns,
+                       (unsigned long long)jobs[free_index].stages.sum_ns,
+                       (unsigned long long)merge_ns,
+                       (unsigned long long)publish_ns,
+                       (unsigned long long)job_total_ns);
+                fflush(stdout);
             }
         } else if (type == PROTO_MSG_FETCH) {
             proto_fetch_t fetch;

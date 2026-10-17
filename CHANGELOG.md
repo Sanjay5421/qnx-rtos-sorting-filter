@@ -3,6 +3,62 @@
 All notable changes to this repository are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## Sorting/filter service — the measurement build (protocol 3)
+
+### Added
+
+- **Per-job filter width.** `proto_submit_t.filter_width` carries the rolling-filter
+  width with the job (odd 3..31, checked by `median_width_valid()`), so one
+  server answers a width sweep without being restarted, and
+  `proto_result_t.filter_width` reports the width actually used.
+  `proto_submit_prepare()` takes the width. The new field fills the padding that
+  was already in front of `desc`, so `sizeof(proto_submit_t)` is unchanged.
+  `PROTO_VERSION` is now 3.
+- **Server stage timings.** `process_submit()` times the copy, the sort, the
+  filter and the checksums separately, and the loop times the run merge and the
+  publish. One `perf:` line per block is printed *after* the completion pulse, so
+  the console write never sits on the measured path; it carries the run number,
+  channel, width and sample count, which is what lets the scorer attribute a
+  block to the sweep case that asked for it.
+- **Client timings and bounded waits.** Per-block submit/service/fetch timings
+  and a run summary; a ten-second connect retry to a deadline (prerequisite 7);
+  a five-second budget on the pulse wait, the fetch and the submit, so a server
+  that dies ends the run with a message instead of hanging the client; and a
+  check that the server used the width the client asked for. New options
+  `-w width` and `-v`.
+- **Board scripts**, installed into the image: `perf-sweep.sh` (the width and
+  thread sweeps — one directory per case, a manifest, server logs),
+  `client-wait-test.sh` (prerequisite 7, both cases), `soak.sh` (repeated runs
+  against one server, medians identical every time).
+- **`tools/filter_sweep.py`** scores a sweep on the PC: masked-cell recall,
+  replacements on clean samples, RMSE/MAE/p99 against the dataset's own truth,
+  the per-block stage cost parsed from the server logs, the client's timing, and
+  four or five figures. It also checks the invariants a sweep must not break —
+  the same `raw.bin`, the same block medians and the same quality for every case
+  of a recording and channel.
+- **`docs/TESTING.md`** — every test, host and board, the commands to run them,
+  the sweeps, and how to read their output.
+
+### Changed
+
+- `median_width_valid()` and `median_width_parse()` are now the one home of the
+  width rule, shared by the filter, the message validation and the command line.
+- The build installs the board scripts beside the programs and
+  `images/rpi4.build` places them in `/bin`; the image is now 37 794 900 B.
+- `docs/IMPLEMENTATION.md`, `REPRODUCE.md`, `FINAL-RUN.md` and the milestone
+  notes brought up to date with all of the above.
+
+### Tests
+
+- `test_median`: the width rule and its parser, and the seam-clipping bound — a
+  signal filtered in chunks without context differs from the whole-signal filter
+  only within half a window of a chunk edge, which is the size of the effect the
+  service's per-block arrays can show.
+- `test_protocol`: the submit's `filter_width` layout, and that unusable widths
+  (0, even, out of range) are refused.
+- Host suite: **9 150 checks, 0 failed, 0 skipped**. All twelve target programs
+  cross-compile clean under `-Wall -Wextra`.
+
 ## Generated dataset — statistics
 
 What the default full build currently produces (`uv run python -m battery_dataset`,

@@ -179,6 +179,9 @@
 /bin/pipeline_demo=pipeline_demo
 /bin/sortmed-server=sortmed-server
 /bin/sortmed-client=sortmed-client
+[uid=0 gid=0 perms=0755] /bin/perf-sweep.sh=perf-sweep.sh
+[uid=0 gid=0 perms=0755] /bin/client-wait-test.sh=client-wait-test.sh
+[uid=0 gid=0 perms=0755] /bin/soak.sh=soak.sh
 
 
 ################################################################################################

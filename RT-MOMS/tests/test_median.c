@@ -515,11 +515,116 @@ static void test_global_median_is_of_raw_data(void)
     T_CHECK(memcmp(raw, sorted_raw, sizeof(raw)) != 0);   /* sorting reordered only its own copy */
 }
 
+/*
+ * The width rule and its parser. They are shared with the protocol validation
+ * and the command-line front ends, so they get their own test here rather than
+ * being re-derived in three places.
+ */
+static void test_width_valid_and_parse(void)
+{
+    static const char *const good[] = { "3", "5", "9", "31", "09" };
+    static const char *const bad[]  = { "", "0", "1", "2", "4", "32", "33",
+                                        "-9", "+9", "9x", "x9", " 9", "9 ",
+                                        "0x9", "99999999999999999999" };
+    uint32_t width;
+    size_t   i;
+
+    T_CHECK_INT(median_width_valid(MEDIAN_MIN_WIDTH), 1);
+    T_CHECK_INT(median_width_valid(MEDIAN_DEFAULT_WIDTH), 1);
+    T_CHECK_INT(median_width_valid(MEDIAN_MAX_WIDTH), 1);
+    T_CHECK_INT(median_width_valid(0), 0);
+    T_CHECK_INT(median_width_valid(2), 0);          /* even: no centre sample */
+    T_CHECK_INT(median_width_valid(MEDIAN_MAX_WIDTH + 2u), 0);
+
+    for (i = 0; i < sizeof(good) / sizeof(good[0]); i++) {
+        width = 0;
+        T_CHECK_INT(median_width_parse(good[i], &width), 0);
+        T_CHECK_INT(width, strtoul(good[i], NULL, 10));
+    }
+    for (i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
+        width = 12345;
+        T_CHECK_INT(median_width_parse(bad[i], &width), -1);
+        T_CHECK_INT(width, 12345);          /* left untouched on failure */
+    }
+    T_CHECK_INT(median_width_parse(NULL, &width), -1);
+    T_CHECK_INT(median_width_parse("9", NULL), -1);
+}
+
+/*
+ * Filtering in chunks with no context differs from filtering the whole signal
+ * only within half a window of a chunk edge: a sample's window at position i
+ * reaches i +/- half, so an edge can only change decisions that close to it.
+ *
+ * That bound is the exact size of the seam effect in the service's per-block
+ * filtered arrays: the server filters each block as it arrives -- the submit
+ * carries no neighbouring samples -- and the client then filters the whole
+ * recording in one call for the file it writes out.
+ *
+ * The signal is built so the effect is certain rather than hoped for. At the
+ * edge sample B the whole-signal window is [B-4..B+4] and the chunked one is
+ * clipped to [B..B+4]:
+ *
+ *   whole   0 0 0 0 5 1 1 1 1   median 1, MAD 1 -> 4 sd, |5-1| = 4: kept at 5
+ *   clipped . . . . 5 1 1 1 1   median 1, MAD 0 -> any deviation: replaced by 1
+ */
+static void test_chunk_edges_without_context(void)
+{
+    static float signal[SIGNAL_LEN];
+    static float whole[SIGNAL_LEN];
+    static float chunked[SIGNAL_LEN];
+    const size_t chunk = 512;               /* the first chunk edge sits here */
+    const size_t half  = MEDIAN_HALF_WIDTH(MEDIAN_DEFAULT_WIDTH);
+    median_config_t cfg;
+    size_t start;
+    size_t differing = 0;
+    size_t i;
+
+    for (i = 0; i < SIGNAL_LEN; i++)
+        signal[i] = 1.0f;
+    for (i = chunk - half; i < chunk; i++)
+        signal[i] = 0.0f;
+    signal[chunk] = 5.0f;
+
+    median_config_default(&cfg);
+    T_CHECK_INT(median_filter_signal(&cfg, signal, SIGNAL_LEN, whole, NULL), 0);
+
+    for (start = 0; start < SIGNAL_LEN; start += chunk) {
+        size_t len = (SIGNAL_LEN - start < chunk) ? (SIGNAL_LEN - start) : chunk;
+
+        /* No context: exactly how the server filters one block. */
+        T_CHECK_INT(median_filter_block(&cfg, NULL, 0, signal + start, len,
+                                        NULL, 0, chunked + start, NULL), 0);
+    }
+
+    /* The edge sample survives the whole-signal filter and is replaced here. */
+    T_CHECK_SAME_FLOAT(whole[chunk], 5.0f);
+    T_CHECK_SAME_FLOAT(chunked[chunk], 1.0f);
+
+    /* Every other difference is within half a window of a chunk edge... */
+    for (start = 0; start < SIGNAL_LEN; start++) {
+        size_t edge, next;
+
+        if (t_bits(whole[start]) == t_bits(chunked[start]))
+            continue;
+        differing++;
+
+        edge = (start / chunk) * chunk;     /* the chunk's own start */
+        next = edge + chunk;                /* and the edge after it */
+        T_CHECK(start - edge < half ||
+                (next < SIGNAL_LEN && next - start <= half));
+    }
+
+    /* ...and there are only that bounded few of them. */
+    T_CHECK(differing > 0);
+    T_CHECK(differing <= (SIGNAL_LEN / chunk + 1) * 2 * half);
+}
+
 int main(void)
 {
     printf("test_median\n");
 
     T_RUN(test_config);
+    T_RUN(test_width_valid_and_parse);
     T_RUN(test_rejects_bad_arguments);
     T_RUN(test_empty_and_tiny);
     T_RUN(test_clean_signal_untouched);
@@ -527,6 +632,7 @@ int main(void)
     T_RUN(test_burst_and_dropout);
     T_RUN(test_matches_reference);
     T_RUN(test_blocks_equal_whole_signal);
+    T_RUN(test_chunk_edges_without_context);
     T_RUN(test_spike_on_block_seam);
     T_RUN(test_spikes_removed_in_noise);
     T_RUN(test_median_of_sorted);

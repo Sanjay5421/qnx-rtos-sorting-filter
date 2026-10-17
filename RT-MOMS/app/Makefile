@@ -28,6 +28,12 @@ TEST_PROGRAMS = test_protocol test_sensor test_block_loader test_mergesort \
 SERVICE_PROGRAMS = sortmed-server sortmed-client
 PROGRAMS = $(TEST_PROGRAMS) $(SERVICE_PROGRAMS)
 
+# Board-side shell scripts: the width/thread sweep, the client-wait test and the
+# soak. Installed next to the programs so images/rpi4.build can place them in
+# /bin, which is what makes the sweep a single command on the board instead of
+# a file to copy onto the card first.
+BOARD_SCRIPTS = perf-sweep.sh client-wait-test.sh soak.sh
+
 # mergesort.c uses POSIX threads, which the QNX C library provides without an
 # extra library or flag; the host build needs the compiler split described in
 # ../tests/Makefile.
@@ -57,6 +63,10 @@ sortmed-client: client.c sensor.c protocol.c block_loader.c mergesort.c median.c
 install: all
 	mkdir -p $(INSTALL_BIN)
 	cp $(PROGRAMS) $(INSTALL_BIN)
+	@for s in $(BOARD_SCRIPTS); do \
+		cp ../board/$$s $(INSTALL_BIN) || exit 1; \
+		chmod 755 $(INSTALL_BIN)/$$s || exit 1; \
+	done
 	@for f in $(PAYLOAD); do \
 		if [ -f "$$f" ]; then \
 			mkdir -p $(INSTALL_DATA); \

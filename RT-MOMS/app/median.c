@@ -28,15 +28,44 @@ void median_config_default(median_config_t *cfg)
     cfg->threshold = MEDIAN_DEFAULT_THRESHOLD;
 }
 
+int median_width_valid(uint32_t width)
+{
+    if (width < MEDIAN_MIN_WIDTH || width > MEDIAN_MAX_WIDTH) {
+        return 0;
+    }
+    return (width & 1u) != 0u;          /* a window needs a centre sample */
+}
+
+int median_width_parse(const char *text, uint32_t *width)
+{
+    const char *p;
+    uint32_t    value = 0;
+
+    if (text == NULL || width == NULL || *text == '\0') {
+        return -1;
+    }
+    for (p = text; *p != '\0'; p++) {
+        if (*p < '0' || *p > '9') {
+            return -1;
+        }
+        value = value * 10u + (uint32_t)(*p - '0');
+        if (value > MEDIAN_MAX_WIDTH) {  /* already too large to become valid */
+            return -1;
+        }
+    }
+    if (!median_width_valid(value)) {
+        return -1;
+    }
+    *width = value;
+    return 0;
+}
+
 int median_config_valid(const median_config_t *cfg)
 {
     if (cfg == NULL) {
         return 0;
     }
-    if (cfg->width < MEDIAN_MIN_WIDTH || cfg->width > MEDIAN_MAX_WIDTH) {
-        return 0;
-    }
-    if ((cfg->width & 1u) == 0u) {      /* a window needs a centre sample */
+    if (!median_width_valid(cfg->width)) {
         return 0;
     }
     if (!(cfg->threshold > 0.0f)) {     /* also rejects NaN */

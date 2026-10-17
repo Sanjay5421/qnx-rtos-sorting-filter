@@ -13,16 +13,15 @@ the injection mask a median filter can be scored against.
 | --- | --- |
 | `README.md` | this file |
 | `CHANGELOG.md` | what changed, and why |
-| `RT-MOMS/` | the QNX side: the service sources in `app/`, the host tests and tools in `tests/`, the board support package with the boot image in `images/` |
-| `IMPLEMENTATION.md` | how each stage of the service works, in pipeline order, with diagrams |
-| `STUDY-GUIDE.md` | the same project in plain language, by milestone, for demos and revision |
-| `REPRODUCE.md` | every command to build and run it, host and target, with expected output |
-| `FINAL-RUN.md` | the integrated client/server run on the board: commands, expected console output, what to check |
-| `tools/` | `plot_run.py` turns a run's files into report figures (noisy vs cleaned, zoom, summary); `plot_vs_truth.py` compares the same run against the dataset's ground truth, with error metrics |
+| `RT-MOMS/` | the QNX side: the service sources in `app/`, the host tests in `tests/`, the board scripts in `board/`, the board support package with the boot image in `images/` |
+| `docs/` | the documents: `IMPLEMENTATION.md` (how each stage works, in pipeline order, with diagrams), `TESTING.md` (every test, and how to run it), `REPRODUCE.md` (every build and run command), `FINAL-RUN.md` (the integrated board run), `STUDY-GUIDE.md` (the project in plain language), `milestones-draft.md`, and the assignment and report template |
+| `tools/` | `plot_run.py` turns a run's files into report figures (noisy vs cleaned, zoom, summary); `plot_vs_truth.py` compares the same run against the dataset's ground truth, with error metrics; `filter_sweep.py` scores a width or worker-count sweep from the board |
 | `data/` | PyBaMM generator for the synthetic client payload (`src/battery_dataset/`) |
 | `data/artifacts/dataset/` | generated payload — `.npz`, manifest, CSV (git-ignored, ≈ 20 MiB) |
 | `data/artifacts/figures/` | generated diagnostic figures (committed; shown below) |
-| `qnx_project/` | the first, standalone loader experiment — superseded by `RT-MOMS/tests/sensor_demo.c` |
+| `legacy/` | the first, standalone loader experiment — superseded by `RT-MOMS/tests/sensor_demo.c` |
+| `run-figures/` | figures produced from a board run (git-ignored; regenerable from the run's files) |
+| `presentation/` | the Beamer deck for the demo |
 
 ## Generating the dataset — one command
 

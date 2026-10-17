@@ -84,8 +84,12 @@
 /*: Bumped whenever the layout of any message in this header changes.
  *  2: proto_submit_t gained `flags` (PROTO_SUBMIT_LAST), and the shared region
  *     gained the run descriptor plus the globally sorted array behind the
- *     slots, so the server can answer with the whole recording's median. */
-#define PROTO_VERSION 2u
+ *     slots, so the server can answer with the whole recording's median.
+ *  3: proto_submit_t gained `filter_width`: the rolling-filter window is the
+ *     client's choice for the job rather than a property of the server, so one
+ *     server can answer a sweep of widths, and proto_result_t.filter_width
+ *     reports back the width that was actually used. */
+#define PROTO_VERSION 3u
 
 /* ------------------------------------------------------------------------- */
 /* Message types                                                              */
@@ -368,7 +372,11 @@ typedef struct {
  *
  * The client chooses job_id and the server echoes it in the ack, the pulse and
  * the result, which is how the client pairs an asynchronous completion with
- * the request that caused it.
+ * the request that caused it. The client also chooses filter_width: the width
+ * of the rolling filter is a property of the job, so one server can serve a
+ * width sweep without being restarted, and the result says which width was
+ * used. `filter_width` occupies bytes that were padding before `desc`, so this
+ * field costs nothing on the wire and sizeof(proto_submit_t) is unchanged.
  */
 /*: proto_submit_t.flags. A block flagged PROTO_SUBMIT_LAST is the recording's
  *  last: once it is sorted and filtered the server completes the run's global
@@ -381,8 +389,16 @@ typedef struct {
     uint16_t version;       /* PROTO_VERSION                                  */
     uint32_t job_id;
     uint32_t flags;         /* PROTO_SUBMIT_LAST, or 0                        */
+    uint32_t filter_width;  /* rolling filter window; odd, MEDIAN_MIN_WIDTH..
+                             * MEDIAN_MAX_WIDTH -- median_width_valid()       */
     proto_block_desc_t desc;
 } proto_submit_t;
+
+/* The width shares the padding that aligned `desc`, which is why the submit
+ * did not grow: a check that a future field does not silently move it. */
+PROTO_STATIC_ASSERT(offsetof(proto_submit_t, filter_width) == 12,
+                    submit_width_sits_in_the_old_padding);
+PROTO_STATIC_ASSERT(offsetof(proto_submit_t, desc) == 16, submit_desc_aligned);
 
 /* The server's reply to a submit: the job was accepted, or why it was not. */
 typedef struct {
@@ -450,10 +466,13 @@ int proto_submit_valid(const proto_submit_t *msg);
 /* proto_submit_valid() plus "the block matches the descriptor's checksum". */
 int proto_submit_verify(const proto_submit_t *msg, const proto_block_t *block);
 
-/* Fill in a submit header: type, version, job id and a copy of the descriptor.
- * It clears the whole struct first, so no stale padding goes on the wire. */
+/* Fill in a submit header: type, version, job id, filter width and a copy of
+ * the descriptor. It clears the whole struct first, so no stale padding goes
+ * on the wire. The width must pass median_width_valid(); the check itself is
+ * proto_submit_valid()'s. */
 void proto_submit_prepare(proto_submit_t *msg, uint32_t job_id,
-                          const proto_block_desc_t *desc);
+                          const proto_block_desc_t *desc,
+                          uint32_t filter_width);
 
 /*
  * The median a completion pulse carries. A pulse's value word is 32 bits, which

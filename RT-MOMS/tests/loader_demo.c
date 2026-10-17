@@ -16,6 +16,7 @@
  */
 
 #include "../app/block_loader.h"
+#include "../app/median.h"
 #include "../app/protocol.h"
 #include "../app/sensor.h"
 
@@ -123,7 +124,8 @@ int main(int argc, char **argv)
         int ok_payload;
 
         /* This is the client's side of the wire format: header plus block. */
-        proto_submit_prepare(&msg, (uint32_t)blocks, &desc);
+        proto_submit_prepare(&msg, (uint32_t)blocks, &desc,
+                             MEDIAN_DEFAULT_WIDTH);
         ok_struct  = proto_submit_valid(&msg);
         ok_payload = proto_submit_verify(&msg, block);
 

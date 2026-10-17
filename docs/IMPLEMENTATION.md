@@ -25,19 +25,21 @@ flowchart LR
     A["1 Recording on disk<br/>float32, two layouts"] --> B["2 Virtual sensor<br/>sample / frame stream — built"]
     B --> C["3 Block loader<br/>64 KiB block + descriptor — built"]
     C --> D["4 Message definition<br/>app/protocol.h — built"]
-    D --> E["5 Client<br/>name_open + MsgSendv IOV — planned M3"]
-    E --> F["6 Server<br/>name_attach + MsgReadv — planned M3"]
+    D --> E["5 Client<br/>name_open + MsgSendv IOV — built"]
+    E --> F["6 Server<br/>name_attach + MsgReadv — built"]
     F --> G["7 Parallel merge sort<br/>worker pool, k partitions — built"]
-    G --> H["8 Rolling median filter<br/>time-ordered copy — planned M3"]
-    H --> I["9 Pulse + fetch + result<br/>protocol built, wiring M4"]
+    G --> H["8 Rolling median filter<br/>time-ordered copy — built"]
+    H --> I["9 Pulse + fetch + result<br/>built"]
     I --> J["10 Boot image + console run<br/>images/rpi4.build — built"]
 ```
 
-Solid stages exist and have been measured; the two marked planned are the next
-piece of work, and the protocol half of stage 9 is already written and tested.
-The same pipeline is what the host tests exercise, with stages 5, 6 and 8
-replaced by a direct function call — that is the whole point of keeping every
-stage QNX-free except the two that talk to the kernel.
+Every stage is built and measured, and the same pipeline is what the host tests
+exercise, with stages 5, 6 and 8 replaced by a direct function call — that is
+the whole point of keeping every stage QNX-free except the two that talk to the
+kernel. What remains is the measurement campaign and the report: the sweeps on
+the board and their scoring are in `TESTING.md`, and since protocol 3 the
+rolling-filter width travels in the submit itself, so one server answers a sweep
+of widths without being restarted.
 
 | Stage | Module | Unit of work | Unit size |
 | --- | --- | --- | --- |
@@ -236,7 +238,7 @@ sensitivity, byte-determinism of `prepare`, and each refusal path.
 
 ---
 
-## 5. The client — `app/client.c` — **[planned, M3]**
+## 5. The client — `app/client.c` — **[built]**
 
 **Implements.** The offload side: replay a recording, assemble 64 KiB blocks,
 send them to the server, and report what came back. Prerequisites it must satisfy:
@@ -285,7 +287,7 @@ produce exactly what the submit message wants.
 
 ---
 
-## 6. The server — `app/server.c` — **[planned, M3]**
+## 6. The server — `app/server.c` — **[built]**
 
 **Implements.** The service side: accept submits, validate them, do the work, and
 answer asynchronously. The exchange both sides implement is the sequence diagram
@@ -386,7 +388,7 @@ parallel path doing the work, not just a faster serial one.
 
 ---
 
-## 8. The rolling median filter — `app/median.c` — **[planned, M3]**
+## 8. The rolling median filter — `app/median.c` — **[built]**
 
 **Implements.** Outlier removal on the time-ordered signal, and the median the
 result carries.
@@ -424,7 +426,7 @@ flowchart LR
 
 ---
 
-## 9. The completion pulse and the result — **[protocol built, wiring M4]**
+## 9. The completion pulse and the result — **[built]**
 
 **Implements.** Prerequisite 10: the server tells the client asynchronously, and
 the client can then collect "the calculated median and memory-offset descriptor"
@@ -478,9 +480,9 @@ flowchart LR
 - `images/rpi4.build` places the programs in `/bin` and the payload in `/data`
   (those entries are optional, so a checkout without the generated data still
   builds an image — it just reports the payload tests as skipped).
-- The image currently carries seven programs and is 37 742 192 B with the sort in
-  it; `dumpifs images/ifs-rpi4.bin` lists them back out, which is the check that
-  they are really inside.
+- The image currently carries twelve programs, the three board scripts and the
+  payload in 37 794 900 B; `dumpifs images/ifs-rpi4.bin` lists them back out,
+  which is the check that they are really inside.
 - The console is the interface: `/dev/ser1` at 115200 8N1, a `ksh` prompt, and
   `/tmp` for the scratch files the tests write. The board's own runs are recorded
   in `REPRODUCE.md` section 8, including which lines still have to be captured.
@@ -510,8 +512,8 @@ flowchart LR
 
 | Quantity | Value |
 | --- | --- |
-| Host test result | 1473 checks, 0 failed, 0 skipped (642 + 137 + 116 + 578) |
-| Board test result | `test_protocol` 82 (the image at the time; the suite is now 137), `test_block_loader` 116, `test_mergesort` 578 — 0 failed, 0 skipped each |
+| Host test result | 9 150 checks, 0 failed, 0 skipped (642 sensor + 186 protocol + 116 loader + 578 mergesort + 7 615 median + 13 shared memory) |
+| Board test result | `test_mergesort` 578, `test_block_loader` 116 and the payload suites — 0 failed, 0 skipped each; `FINAL-RUN.md` §5 has the per-suite state |
 | Block size | 16384 samples = 65536 B |
 | 60 000-sample recording | 3 full blocks + 10 848 samples |
 | Payload bytes as blocks | 262 144 B (4 × 65 536) |
@@ -519,20 +521,24 @@ flowchart LR
 | Block sort on the Raspberry Pi 4, 4 workers | 0.757 ms per block, 75.55 MiB/s, 21.6 M samples/s |
 | Thread scaling on the Pi 4 | 2.278 ms → 1.253 ms → 0.757 ms per block at 1, 2, 4 workers: 3.01× |
 | Real-time headroom at 100 Hz | one 64 KiB block is 163.84 s of signal, sorted in 0.757 ms |
-| Cross-compile | 7/7 binaries, ELF64 AArch64, no warnings |
-| Boot image carrying the programs | 37 742 192 B, SHA-256 `57637557…4588c49` |
+| Cross-compile | 12/12 programs, ELF64 AArch64, no warnings under `-Wall -Wextra` |
+| Boot image carrying the programs | 37 794 900 B, SHA-256 `3a93b2e2…61bd023` — the service, the suites and the three board scripts |
+| Filter width | per job since protocol 3: `proto_submit_t.filter_width`, odd 3..31, checked by `proto_submit_valid()`; the server's default stays 9 |
 
 ---
 
-## 13. Still to build, and where each piece plugs in
+## 13. What is left
 
-| Piece | Stage | Milestone | Plugs into |
-| --- | --- | --- | --- |
-| Client: `name_open`, retry to a 10 s deadline, `MsgSendv` of `{header, block}` | 5 | M3 | `protocol.h` submit + `block_loader` |
-| Server: `name_attach`, `MsgReceivev`/`MsgReadv`, validation, ack, job queue | 6 | M3 | `proto_submit_verify()` already exists; pool from stage 7 |
-| Rolling median filter, outlier removal | 8 | M3 | the time-ordered copy of the block, next to the sorted one |
-| Completion pulse, fetch, result | 9 | M4 | `PROTO_PULSE_DONE`, `PROTO_MSG_FETCH`, `proto_result_t` |
-| On-board run of the payload suites | 10 | M4 | `test_sensor /data` tail; then the client and server |
+Everything the service needs is built, and it ran on the board (`FINAL-RUN.md`).
+What remains is the measurement campaign and the write-up:
+
+| Piece | Milestone | Where it stands |
+| --- | --- | --- |
+| The width sweep on the board | M4 | `sh /bin/perf-sweep.sh width`, scored by `tools/filter_sweep.py` — `TESTING.md` §3.3 and §4 |
+| The thread sweep | M4 | `sh /bin/perf-sweep.sh threads` — `TESTING.md` §3.4 |
+| Prerequisite 7, demonstrated on hardware | M3 | `sh /bin/client-wait-test.sh` — `TESTING.md` §3.5 |
+| Behaviour under repeated requests | M4 | `sh /bin/soak.sh` — `TESTING.md` §3.6 |
+| The report's results section | M4 | the tables and figures those runs write, plus the block diagram and flowchart the brief asks for |
 
 The protocol was written first on purpose: it fixes the interface the sort, the
 filter and the IPC must all satisfy, and it is the one part that can be proved

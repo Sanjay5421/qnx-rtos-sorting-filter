@@ -1,7 +1,9 @@
 # Reproduce
 
 Every command needed to build this project's QNX-side code and run its tests.
-Commands only — the explanation is in [IMPLEMENTATION.md](IMPLEMENTATION.md).
+Commands only — the explanation is in [IMPLEMENTATION.md](IMPLEMENTATION.md),
+and what each test covers, plus the timing sweeps and how to read their output,
+is in [TESTING.md](TESTING.md).
 
 Markers: **[verified]** = run on this machine and produced the stated result.
 **[planned]** = not run yet.
@@ -207,7 +209,7 @@ programs talking to each other — has its own run sheet in
 
 | File | Notes |
 | --- | --- |
-| `ifs-rpi4.bin` | **37 742 192 B**, SHA-256 `57637557e9a8565974714802f412f074767bc1d3d5fab1c2779437d045588c49`. The stock image is 34 489 984 B and contains none of the programs below. |
+| `ifs-rpi4.bin` | **37 794 900 B**, SHA-256 `3a93b2e2e4664a09e4934e7ae327d408487f79b630f389406289977d161bd023`. The stock image is 34 489 984 B and contains none of the programs below. The current build also carries the three board scripts (`/bin/perf-sweep.sh`, `client-wait-test.sh`, `soak.sh`) — see [TESTING.md](TESTING.md). |
 | `config.txt` | the BSP guide's `[rpi4]` block; `kernel=ifs-rpi4.bin` is what boots this image |
 | firmware | `start4.elf`, `fixup4.dat`, `bcm2711-rpi-4-b.dtb`, `overlays/` |
 
@@ -359,7 +361,7 @@ repository stayed clean:
 | --- | --- | --- |
 | Compile the BSP sources | `make` | exit 0, 83 s |
 | Build the image | `make images` | exit 0, 7 s, `ifs-rpi4.bin` = 36 197 292 B (BSP only) |
-| Build the image with the programs | `make` in `RT-MOMS/` | exit 0, 27 s incremental, `ifs-rpi4.bin` = 37 742 192 B |
+| Build the image with the programs | `make` in `RT-MOMS/` | exit 0, 27 s incremental, `ifs-rpi4.bin` = 37 794 900 B |
 
 ```bat
 cd RT-MOMS

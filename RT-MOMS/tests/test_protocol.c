@@ -11,6 +11,7 @@
  */
 
 #include "../app/protocol.h"
+#include "../app/median.h"
 #include "test_util.h"
 
 #include <stddef.h>
@@ -86,6 +87,13 @@ static void test_field_layout(void)
     T_CHECK_SIZE(sizeof(((proto_block_desc_t *)0)->first_sample), 8);
     T_CHECK_SIZE(sizeof(((proto_block_desc_t *)0)->samples), 4);
     T_CHECK_SIZE(sizeof(((proto_result_t *)0)->elapsed_ns), 8);
+
+    /* The submit's filter width takes the padding that used to sit before
+     * `desc`, so asking for a width costs no bytes on the wire. A future field
+     * must not silently move it. */
+    T_CHECK_SIZE(offsetof(proto_submit_t, filter_width), 12);
+    T_CHECK_SIZE(offsetof(proto_submit_t, desc), 16);
+    T_CHECK_SIZE(offsetof(proto_result_t, filter_width), 12);
 }
 
 static void test_shm_name(void)
@@ -314,8 +322,8 @@ static void test_submit_prepare_is_deterministic(void)
     memset(&dirty, 0xAA, sizeof(dirty));
     memset(&clean, 0x00, sizeof(clean));
 
-    proto_submit_prepare(&dirty, 42, &desc);
-    proto_submit_prepare(&clean, 42, &desc);
+    proto_submit_prepare(&dirty, 42, &desc, MEDIAN_DEFAULT_WIDTH);
+    proto_submit_prepare(&clean, 42, &desc, MEDIAN_DEFAULT_WIDTH);
 
     T_CHECK(memcmp(&dirty, &clean, sizeof(dirty)) == 0);
     T_CHECK_INT(dirty.type, PROTO_MSG_SUBMIT);
@@ -323,7 +331,7 @@ static void test_submit_prepare_is_deterministic(void)
     T_CHECK_INT(clean.job_id, 42);
     T_CHECK_INT(clean.desc.samples, 16384);
 
-    proto_submit_prepare(NULL, 1, NULL);   /* must not crash */
+    proto_submit_prepare(NULL, 1, NULL, MEDIAN_DEFAULT_WIDTH);  /* must not crash */
 }
 
 static void test_submit_validation(void)
@@ -350,10 +358,30 @@ static void test_submit_validation(void)
     desc.min_value    = 0.0f;
     desc.max_value    = 12.375f;
 
-    proto_submit_prepare(&msg, 7, &desc);
+    proto_submit_prepare(&msg, 7, &desc, MEDIAN_DEFAULT_WIDTH);
     T_CHECK_INT(msg.flags, 0);                     /* prepare clears it */
+    T_CHECK_INT(msg.filter_width, MEDIAN_DEFAULT_WIDTH);
     T_CHECK_INT(proto_submit_valid(&msg), 1);
     T_CHECK_INT(proto_submit_verify(&msg, block), 1);
+
+    /*
+     * The width is the client's request for this job, so a width the filter
+     * cannot run is refused here rather than reaching the filter: even, out of
+     * range, or 0.
+     */
+    msg.filter_width = 0;
+    T_CHECK_INT(proto_submit_valid(&msg), 0);
+    msg.filter_width = 2;                          /* even */
+    T_CHECK_INT(proto_submit_valid(&msg), 0);
+    T_CHECK_INT(proto_submit_verify(&msg, block), 0);
+    msg.filter_width = MEDIAN_MAX_WIDTH + 2u;      /* odd, but too wide */
+    T_CHECK_INT(proto_submit_valid(&msg), 0);
+    msg.filter_width = MEDIAN_MIN_WIDTH;           /* the narrowest accepted */
+    T_CHECK_INT(proto_submit_valid(&msg), 1);
+    msg.filter_width = MEDIAN_MAX_WIDTH;           /* and the widest */
+    T_CHECK_INT(proto_submit_valid(&msg), 1);
+    msg.filter_width = MEDIAN_DEFAULT_WIDTH;
+    T_CHECK_INT(proto_submit_valid(&msg), 1);
 
     /* The one flag this protocol knows: "this is the recording's last block". */
     msg.flags = PROTO_SUBMIT_LAST;
@@ -431,7 +459,7 @@ static void test_partial_block_checksum(void)
     desc.channel   = (uint32_t)PROTO_CHANNEL_TEMPERATURE;
     desc.checksum  = proto_checksum(block->samples, 100 * sizeof(float));
 
-    proto_submit_prepare(&msg, 1, &desc);
+    proto_submit_prepare(&msg, 1, &desc, MEDIAN_DEFAULT_WIDTH);
     T_CHECK_INT(proto_submit_verify(&msg, block), 1);
 
     block->samples[100] = 12345.0f;               /* touch the tail only */

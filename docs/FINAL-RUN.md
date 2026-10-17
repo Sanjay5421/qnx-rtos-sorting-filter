@@ -53,8 +53,9 @@ sha256sum ifs-rpi4.bin
 | | |
 | --- | --- |
 | Path | `RT-MOMS/images/ifs-rpi4.bin` |
-| Size | 37 775 020 B |
-| SHA-256 | `9f875858d38027bae35ea23843e9ddb1f58207e96beb3c7c7d5ede4b49b87a98` |
+| Size | 37 794 900 B |
+| SHA-256 | `3a93b2e2e4664a09e4934e7ae327d408487f79b630f389406289977d161bd023` |
+| Carries | the service, the suites, the payload, and three board scripts: `perf-sweep.sh` (the width and thread sweeps), `client-wait-test.sh` (prerequisite 7) and `soak.sh` (repeated runs) — see `TESTING.md` |
 
 Copy it to the SD card's FAT partition beside `config.txt` (`kernel=ifs-rpi4.bin`)
 and the firmware files (`start4.elf`, `fixup4.dat`, `bcm2711-rpi-4-b.dtb`,
@@ -141,6 +142,13 @@ recording complete: samples=60000 global_median=3.56619358 rolling_filter_width=
 cross-check: server pulse/descriptor median 3.56619358 == client 3.56619358
 output written: raw.bin (240000 bytes), sorted.bin (240000 bytes), filtered.bin (240000 bytes), medians.csv (4 blocks)
 ```
+
+The current build prints two more lines after `output written:` — the client's
+own timing (`timing: run_ns=… submit_avg_ns=… service_avg_ns=… fetch_avg_ns=…`
+and `timing: post_sort_ns=… post_filter_ns=… write_ns=…`) — and the server
+prints one `perf:` line per block with its stage times, the width it used and
+the run it belongs to. Those lines are what the sweeps in `TESTING.md` read; the
+numbers in this file are the 2026-10-17 run's.
 
 The `pulse:` line is printed the moment the completion pulse arrives and is
 purely what the pulse carried: its code (16 + the job id) and the median decoded

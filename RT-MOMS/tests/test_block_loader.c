@@ -11,6 +11,7 @@
  */
 
 #include "../app/block_loader.h"
+#include "../app/median.h"
 #include "../app/protocol.h"
 #include "../app/sensor.h"
 #include "test_data.h"
@@ -371,7 +372,7 @@ static void test_submit_round_trip(void)
         return;
     }
 
-    proto_submit_prepare(&msg, 42, &desc);
+    proto_submit_prepare(&msg, 42, &desc, MEDIAN_DEFAULT_WIDTH);
     T_CHECK_INT(msg.type, PROTO_MSG_SUBMIT);
     T_CHECK_INT(msg.version, PROTO_VERSION);
     T_CHECK_INT(msg.job_id, 42);
@@ -417,7 +418,7 @@ static void test_corruption_detected(void)
         free(block);
         return;
     }
-    proto_submit_prepare(&msg, 1, &desc);
+    proto_submit_prepare(&msg, 1, &desc, MEDIAN_DEFAULT_WIDTH);
     T_CHECK_INT(proto_submit_verify(&msg, block), 1);
 
     /* One bit of one sample is enough to be caught. */

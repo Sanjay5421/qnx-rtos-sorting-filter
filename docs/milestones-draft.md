@@ -12,11 +12,11 @@ Status (2026-10-15): **done and verified on the board.** `RT-MOMS/app/mergesort.
 Milestone 3 — Client-Server Communication and Median Filtering
 Implement data transfer between client and server, apply a rolling median filter to the original time-ordered sensor signal, and establish result storage and offset handling.
 Deliverable: Integrated data-processing pipeline with outlier-removal tests.
-Status (2026-10-15): next, nothing started. No client, no server and no median filter yet; the pieces they plug into are listed in `IMPLEMENTATION.md` section 13.
+Status (2026-10-17): **done, and run on hardware.** `RT-MOMS/app/client.c` and `RT-MOMS/app/server.c` implement the exchange end to end — `name_open` with a ten-second retry to a deadline, the two-part `MsgSendv` submit, the ack, results in the shared region, the fetch, and a bounded wait on every hand-off; `RT-MOMS/app/median.c` is the Hampel filter this milestone's report section is about. The four-channel run on the board, with its medians, checksums and server/client cross-check, is recorded in `FINAL-RUN.md`. What is left for the milestone is the prerequisite-7 demonstration on the board (`sh /bin/client-wait-test.sh`, `TESTING.md` §3.5) and the write-up.
 
 Milestone 4 — QNX Pulse Notification and System Validation
 Implement pulse-based completion notification, validate the returned median and memory offset, and evaluate processing time, correctness and behavior under repeated requests.
 Deliverable: Integrated QNX demonstration, performance results and final report.
-Status (2026-10-15): planned. The protocol half is already in place — `PROTO_PULSE_DONE`, `PROTO_MSG_FETCH` and `proto_result_t` carrying the median, the offset/length/checksum descriptor and `elapsed_ns` for the timing study.
+Status (2026-10-17): **built; the measurement campaign is under way.** The pulse, the fetch and the result run end to end, and the build now carries the instrumentation this milestone's performance study needs: per-stage `perf:` lines from the server, client-side `timing:` lines, and — since protocol 3 — the rolling-filter width in the submit, so one server answers a sweep of widths without being restarted. The sweeps, the checks and the scoring are in `TESTING.md`; their numbers go into the report.
 
 Some minor modifications can be made as we move along.
