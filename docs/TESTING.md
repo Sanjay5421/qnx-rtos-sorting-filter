@@ -65,9 +65,9 @@ then builds the image:
 
 | | |
 | --- | --- |
-| Path | `RT-MOMS/images/ifs-rpi4.bin` |
-| Size | 37 794 900 B |
-| SHA-256 | `3a93b2e2e4664a09e4934e7ae327d408487f79b630f389406289977d161bd023` |
+| Path | `RT-MOMS/images/ifs-rpi4.bin` — and a copy at the repository root (`ifs-rpi4.bin`) for convenience |
+| Size | 37 797 716 B |
+| SHA-256 | `2ac01f08157ded8fcb0ae132fbd732bb3f5b5756d40757f490b4e20a31fc9d8b` |
 
 The image carries the service (`/bin/sortmed-server`, `/bin/sortmed-client`),
 the suites, the three board scripts, and the payload under `/data/bin`. If the

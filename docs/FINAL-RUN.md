@@ -53,8 +53,8 @@ sha256sum ifs-rpi4.bin
 | | |
 | --- | --- |
 | Path | `RT-MOMS/images/ifs-rpi4.bin` |
-| Size | 37 794 900 B |
-| SHA-256 | `3a93b2e2e4664a09e4934e7ae327d408487f79b630f389406289977d161bd023` |
+| Size | 37 797 716 B |
+| SHA-256 | `2ac01f08157ded8fcb0ae132fbd732bb3f5b5756d40757f490b4e20a31fc9d8b` |
 | Carries | the service, the suites, the payload, and three board scripts: `perf-sweep.sh` (the width and thread sweeps), `client-wait-test.sh` (prerequisite 7) and `soak.sh` (repeated runs) — see `TESTING.md` |
 
 Copy it to the SD card's FAT partition beside `config.txt` (`kernel=ifs-rpi4.bin`)

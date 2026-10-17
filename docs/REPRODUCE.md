@@ -209,7 +209,7 @@ programs talking to each other — has its own run sheet in
 
 | File | Notes |
 | --- | --- |
-| `ifs-rpi4.bin` | **37 794 900 B**, SHA-256 `3a93b2e2e4664a09e4934e7ae327d408487f79b630f389406289977d161bd023`. The stock image is 34 489 984 B and contains none of the programs below. The current build also carries the three board scripts (`/bin/perf-sweep.sh`, `client-wait-test.sh`, `soak.sh`) — see [TESTING.md](TESTING.md). |
+| `ifs-rpi4.bin` | **37 797 716 B**, SHA-256 `2ac01f08157ded8fcb0ae132fbd732bb3f5b5756d40757f490b4e20a31fc9d8b`. The stock image is 34 489 984 B and contains none of the programs below. The current build also carries the three board scripts (`/bin/perf-sweep.sh`, `client-wait-test.sh`, `soak.sh`) — see [TESTING.md](TESTING.md). |
 | `config.txt` | the BSP guide's `[rpi4]` block; `kernel=ifs-rpi4.bin` is what boots this image |
 | firmware | `start4.elf`, `fixup4.dat`, `bcm2711-rpi-4-b.dtb`, `overlays/` |
 
@@ -361,7 +361,7 @@ repository stayed clean:
 | --- | --- | --- |
 | Compile the BSP sources | `make` | exit 0, 83 s |
 | Build the image | `make images` | exit 0, 7 s, `ifs-rpi4.bin` = 36 197 292 B (BSP only) |
-| Build the image with the programs | `make` in `RT-MOMS/` | exit 0, 27 s incremental, `ifs-rpi4.bin` = 37 794 900 B |
+| Build the image with the programs | `make` in `RT-MOMS/` | exit 0, 27 s incremental, `ifs-rpi4.bin` = 37 797 716 B |
 
 ```bat
 cd RT-MOMS

@@ -481,7 +481,7 @@ flowchart LR
   (those entries are optional, so a checkout without the generated data still
   builds an image — it just reports the payload tests as skipped).
 - The image currently carries twelve programs, the three board scripts and the
-  payload in 37 794 900 B; `dumpifs images/ifs-rpi4.bin` lists them back out,
+  payload in 37 797 716 B; `dumpifs images/ifs-rpi4.bin` lists them back out,
   which is the check that they are really inside.
 - The console is the interface: `/dev/ser1` at 115200 8N1, a `ksh` prompt, and
   `/tmp` for the scratch files the tests write. The board's own runs are recorded
@@ -522,7 +522,7 @@ flowchart LR
 | Thread scaling on the Pi 4 | 2.278 ms → 1.253 ms → 0.757 ms per block at 1, 2, 4 workers: 3.01× |
 | Real-time headroom at 100 Hz | one 64 KiB block is 163.84 s of signal, sorted in 0.757 ms |
 | Cross-compile | 12/12 programs, ELF64 AArch64, no warnings under `-Wall -Wextra` |
-| Boot image carrying the programs | 37 794 900 B, SHA-256 `3a93b2e2…61bd023` — the service, the suites and the three board scripts |
+| Boot image carrying the programs | 37 797 716 B, SHA-256 `2ac01f08…31fc9d8b` — the service, the suites and the three board scripts |
 | Filter width | per job since protocol 3: `proto_submit_t.filter_width`, odd 3..31, checked by `proto_submit_valid()`; the server's default stays 9 |
 
 ---

@@ -1,3 +1,23 @@
+/*
+ * ============================================================================
+ *   Real-Time Multi-Core Sorting and Median Filter Service
+ *
+ *   The client offloads 64 KiB blocks of unsorted float32 time-series metrics to
+ *   the server. The server sorts each block with a parallel merge sort over four
+ *   worker threads -- mutexes and condition variables guard the merge phases --
+ *   applies a rolling Hampel median filter to remove sensor outliers, and signals
+ *   completion with a QNX pulse carrying the median, with the sorted and filtered
+ *   arrays left in shared memory for the client to read.
+ *
+ *   Anmol Govindarajapuram Krishnan   -  CB.EN.U4EEE23103
+ *   Mauli Rajguru                     -  CB.EN.U4EEE23120
+ *   Sanjay TS                         -  CB.EN.U4EEE23136
+ *
+ *   26ELC331 Real-Time Operating Systems
+ *   Date of evaluation: 17-10-2026
+ * ============================================================================
+ */
+
 
 #ifndef SHARED_MEMORY_H
 #define SHARED_MEMORY_H
