@@ -1,0 +1,125 @@
+\documentclass[tikz,border=6pt]{standalone}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{xcolor}
+\usetikzlibrary{arrows.meta,fit,calc,positioning}
+
+\definecolor{cliBg}{RGB}{232,242,252}
+\definecolor{cliBrd}{RGB}{45,105,175}
+\definecolor{srvBg}{RGB}{254,240,225}
+\definecolor{srvBrd}{RGB}{195,95,25}
+\definecolor{shmBg}{RGB}{230,245,225}
+\definecolor{shmBrd}{RGB}{55,130,45}
+\definecolor{ipcBrd}{RGB}{185,35,35}
+\definecolor{ioBg}{RGB}{242,242,245}
+\definecolor{ioBrd}{RGB}{90,90,100}
+
+\tikzset{
+  box/.style={
+    draw=#1, line width=0.8pt, rounded corners=3pt,
+    align=center, font=\sffamily\footnotesize,
+    inner sep=5pt, minimum height=1.25cm
+  },
+  cblock/.style={box=cliBrd, fill=cliBg},
+  sblock/.style={box=srvBrd, fill=srvBg},
+  shmblock/.style={box=shmBrd, fill=shmBg},
+  ioblock/.style={box=ioBrd, fill=ioBg},
+  groupbox/.style={
+    draw=#1, line width=1.1pt, dashed, rounded corners=5pt,
+    inner sep=9pt
+  },
+  grouplabel/.style={
+    font=\sffamily\bfseries\small, inner sep=3pt
+  },
+  arr/.style={-{Latex[length=2.4mm,width=1.8mm]}, line width=0.9pt, black!75},
+  ipcarr/.style={-{Latex[length=2.5mm,width=1.9mm]}, line width=1.15pt, ipcBrd},
+  ipcboth/.style={{Latex[length=2.4mm,width=1.8mm]}-{Latex[length=2.4mm,width=1.8mm]}, line width=1.15pt, ipcBrd},
+  shmarr/.style={-{Latex[length=2.4mm,width=1.8mm]}, line width=1.0pt, dashed, shmBrd},
+  lbl/.style={font=\sffamily\scriptsize, inner sep=1.5pt}
+}
+
+\begin{document}
+\hyphenpenalty=10000\relax\exhyphenpenalty=10000\relax
+\begin{tikzpicture}
+
+% ==================== LEFT: EXTERNAL STORAGE ====================
+\node[ioblock, text width=3.5cm] (infile) at (-6.8, 1.55) {
+  \textbf{Telemetry Recording}\\
+  Interleaved 4-Channel Data\\
+  60\,000 Time Steps\\
+  (960\,KB Binary Stream)
+};
+
+\node[ioblock, text width=3.5cm] (outfiles) at (-6.8, -1.55) {
+  \textbf{Verified Output Storage}\\
+  Raw, Sorted \& Filtered\\
+  Signal Streams (240\,KB each)\\
+  + Block Summary Table
+};
+
+% ==================== CENTER: CLIENT SUBSYSTEM BLOCKS ====================
+\node[cblock, text width=3.8cm] (vsensor) at (-0.5, 1.55) {
+  \textbf{1. Virtual Sensor Module}\\
+  4096-Record Sliding Window\\
+  Single-Channel Extraction\\
+  128-Sample Frame Output
+};
+
+\node[cblock, text width=3.8cm] (bloader) at (5.8, 1.55) {
+  \textbf{2. Block Assembler}\\
+  16\,384-Sample Crate (64\,KiB)\\
+  Zero-Padding on Final Block\\
+  Min/Max \& Checksum Seal
+};
+
+\node[cblock, text width=3.8cm] (ipceng) at (5.8, -1.55) {
+  \textbf{3. IPC \& Pulse Transceiver}\\
+  Two-Part Scatter/Gather Send\\
+  Asynchronous Pulse Listener\\
+  Result Summary Fetcher
+};
+
+\node[cblock, text width=3.8cm] (combiner) at (-0.5, -1.55) {
+  \textbf{4. Validator \& Combiner}\\
+  Shared Slot Integrity Check\\
+  Full-Recording Global Sort\\
+  \& Seamless Boundary Filter
+};
+
+\node[groupbox=cliBrd, fit=(vsensor)(bloader)(ipceng)(combiner),
+      label={[grouplabel, text=cliBrd]above:Client Subsystem Architecture}] (clibox) {};
+
+% ==================== RIGHT: SERVER & SHARED MEMORY INTERFACES ====================
+\node[sblock, text width=3.8cm] (srvchan) at (12.4, 1.55) {
+  \textbf{QNX Server Interface}\\
+  Block Submission $\rightarrow$ ACK\\
+  Completion Pulse Notification\\
+  Result Summary Reply
+};
+
+\node[shmblock, text width=3.8cm] (shmmap) at (12.4, -1.55) {
+  \textbf{Shared Memory Interface}\\
+  Read-Only Memory Mapping\\
+  4 Result Slots (128\,KiB each)\\
+  Sorted \& Filtered Arrays
+};
+
+% ==================== CONNECTIONS ====================
+\draw[arr] (infile.east) -- node[lbl, above]{stream} (vsensor.west);
+\draw[arr] (vsensor.east) -- node[lbl, above]{frames} (bloader.west);
+\draw[arr] (bloader.south) -- node[lbl, right, xshift=1.5mm]{64\,KiB + header} (ipceng.north);
+\draw[arr] (ipceng.west) -- node[lbl, above]{offsets + seals} (combiner.east);
+\draw[arr] (combiner.west) -- node[lbl, above]{persist} (outfiles.east);
+
+\draw[ipcboth] (clibox.east |- srvchan.west) -- node[lbl, above]{IPC / Pulses} (srvchan.west);
+\draw[shmarr] (shmmap.west) -- node[lbl, above]{zero-copy read} (clibox.east |- shmmap.west);
+
+% Legend bar
+\begin{scope}[shift={(-3.5,-3.35)}]
+  \draw[arr] (0,0) -- (0.9,0) node[right, font=\sffamily\scriptsize]{Internal Module Hand-off};
+  \draw[ipcarr] (4.5,0) -- (5.4,0) node[right, font=\sffamily\scriptsize]{QNX IPC Messages \& Pulses};
+  \draw[shmarr] (9.5,0) -- (10.4,0) node[right, font=\sffamily\scriptsize]{Read-Only Shared Memory Mapping};
+\end{scope}
+
+\end{tikzpicture}
+\end{document}

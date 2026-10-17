@@ -1,0 +1,84 @@
+\documentclass[tikz,border=6pt]{standalone}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{xcolor}
+\usetikzlibrary{arrows.meta,fit,calc,positioning}
+
+\definecolor{cliBg}{RGB}{232,242,252}
+\definecolor{cliBrd}{RGB}{45,105,175}
+\definecolor{srvBg}{RGB}{254,240,225}
+\definecolor{srvBrd}{RGB}{195,95,25}
+\definecolor{shmBg}{RGB}{230,245,225}
+\definecolor{shmBrd}{RGB}{55,130,45}
+\definecolor{ioBg}{RGB}{242,242,245}
+\definecolor{ioBrd}{RGB}{90,90,100}
+
+\tikzset{
+  box/.style={
+    draw=#1, line width=0.8pt, rounded corners=3pt,
+    align=center, font=\sffamily\footnotesize,
+    inner sep=5pt, minimum height=1.35cm
+  },
+  cblock/.style={box=cliBrd, fill=cliBg},
+  sblock/.style={box=srvBrd, fill=srvBg},
+  shmblock/.style={box=shmBrd, fill=shmBg},
+  ioblock/.style={box=ioBrd, fill=ioBg},
+  arr/.style={-{Latex[length=2.4mm,width=1.8mm]}, line width=0.9pt, black!75},
+  shmarr/.style={-{Latex[length=2.4mm,width=1.8mm]}, line width=1.0pt, dashed, shmBrd},
+  lbl/.style={font=\sffamily\scriptsize, inner sep=1.5pt}
+}
+
+\begin{document}
+\hyphenpenalty=10000\relax\exhyphenpenalty=10000\relax
+\begin{tikzpicture}
+
+\node[ioblock, text width=3.8cm] (file) at (0, 1.7) {
+  \textbf{1. Telemetry Storage}\\
+  60\,000 $\times$ 4 Channels\\
+  Time, Voltage, Current, Temp\\
+  (960\,KB Binary File)
+};
+
+\node[cblock, text width=3.8cm] (window) at (6.2, 1.7) {
+  \textbf{2. Sensor Sliding Window}\\
+  4096 Records in RAM\\
+  Extracts Voltage Channel\\
+  128 Samples per Frame
+};
+
+\node[cblock, text width=4.0cm] (crate) at (12.4, 1.7) {
+  \textbf{3. IPC Block Transfer}\\
+  48\,B Descriptor Header\\
+  + 64\,KiB Sample Block\\
+  32-Bit Checksum Seal
+};
+
+\node[sblock, text width=4.0cm] (sbuf) at (12.4, -1.7) {
+  \textbf{4. Dual Server Processing}\\
+  Copy 1 $\rightarrow$ 4-Thread Merge Sort\\
+  Copy 2 $\rightarrow$ 9-Sample Hampel Filter\\
+  (Time Order Preserved)
+};
+
+\node[shmblock, text width=3.8cm] (shmslot) at (6.2, -1.7) {
+  \textbf{5. Shared Memory Slot}\\
+  64\,KiB Sorted Block\\
+  64\,KiB Filtered Block\\
+  + 48\,B Statistical Summary
+};
+
+\node[ioblock, text width=3.8cm] (outputs) at (0, -1.7) {
+  \textbf{6. Verified Output Files}\\
+  Raw, Sorted \& Filtered\\
+  Binary Streams (240\,KB each)\\
+  + Block Summary Table
+};
+
+\draw[arr] (file.east) -- node[lbl, above]{windowed read} (window.west);
+\draw[arr] (window.east) -- node[lbl, above]{128 frames} (crate.west);
+\draw[arr] (crate.south) -- node[lbl, right, xshift=1.5mm]{QNX IPC} (sbuf.north);
+\draw[shmarr] (sbuf.west) -- node[lbl, above]{publish slot} (shmslot.east);
+\draw[shmarr] (shmslot.west) -- node[lbl, above]{verify \& combine} (outputs.east);
+
+\end{tikzpicture}
+\end{document}

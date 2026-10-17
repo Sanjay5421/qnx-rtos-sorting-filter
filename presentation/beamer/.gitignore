@@ -1,0 +1,15 @@
+# LaTeX build products
+*.aux
+*.log
+*.nav
+*.out
+*.snm
+*.toc
+*.fls
+*.fdb_latexmk
+*.synctex.gz
+*.vrb
+
+# Page renders and screenshot triage, used while checking the layout
+.preview/
+.identify/

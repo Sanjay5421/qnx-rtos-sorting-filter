@@ -1,0 +1,18 @@
+% ---------------------------------------------------------------------------
+% main.tex — the deck
+%
+%   pdflatex main.tex      (twice, so the page totals settle)
+%   make                   (does both passes)
+%
+% The slides are in content.tex and the look is in theme.tex, so this file is
+% only the document shell.
+% ---------------------------------------------------------------------------
+
+\documentclass[aspectratio=169, 11pt]{beamer}
+
+\input{deck}      % preamble and metadata
+\input{theme}     % palette, chrome, boxes, title page
+\input{diagrams}  % diagram slides and their helpers
+
+\begin{document}
+\input{content}   % the slides

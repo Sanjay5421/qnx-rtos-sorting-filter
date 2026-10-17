@@ -1,0 +1,122 @@
+\documentclass[tikz,border=6pt]{standalone}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{xcolor}
+\usetikzlibrary{arrows.meta,fit,calc,positioning}
+
+\definecolor{cliBg}{RGB}{232,242,252}
+\definecolor{cliBrd}{RGB}{45,105,175}
+\definecolor{srvBg}{RGB}{254,240,225}
+\definecolor{srvBrd}{RGB}{195,95,25}
+\definecolor{engBg}{RGB}{255,248,220}
+\definecolor{engBrd}{RGB}{180,120,20}
+\definecolor{shmBg}{RGB}{230,245,225}
+\definecolor{shmBrd}{RGB}{55,130,45}
+\definecolor{ipcBrd}{RGB}{185,35,35}
+
+\tikzset{
+  box/.style={
+    draw=#1, line width=0.8pt, rounded corners=3pt,
+    align=center, font=\sffamily\footnotesize,
+    inner sep=5pt, minimum height=1.15cm
+  },
+  cblock/.style={box=cliBrd, fill=cliBg},
+  sblock/.style={box=srvBrd, fill=srvBg},
+  eblock/.style={box=engBrd, fill=engBg},
+  shmblock/.style={box=shmBrd, fill=shmBg},
+  groupbox/.style={
+    draw=#1, line width=1.1pt, dashed, rounded corners=5pt,
+    inner sep=9pt
+  },
+  grouplabel/.style={
+    font=\sffamily\bfseries\small, inner sep=3pt
+  },
+  arr/.style={-{Latex[length=2.4mm,width=1.8mm]}, line width=0.9pt, black!75},
+  ipcarr/.style={-{Latex[length=2.5mm,width=1.9mm]}, line width=1.15pt, ipcBrd},
+  ipcboth/.style={{Latex[length=2.4mm,width=1.8mm]}-{Latex[length=2.4mm,width=1.8mm]}, line width=1.15pt, ipcBrd},
+  shmarr/.style={-{Latex[length=2.4mm,width=1.8mm]}, line width=1.0pt, dashed, shmBrd},
+  lbl/.style={font=\sffamily\scriptsize, inner sep=1.5pt}
+}
+
+\begin{document}
+\hyphenpenalty=10000\relax\exhyphenpenalty=10000\relax
+\begin{tikzpicture}
+
+% ==================== LEFT: CLIENT INTERFACE ====================
+\node[cblock, text width=3.1cm, minimum height=5.4cm] (client) at (-7.0, 0) {
+  \textbf{Client Subsystem}\\[3mm]
+  1. Submits 64\,KiB\\
+  Block + Header\\[2mm]
+  2. Receives Immediate\\
+  Acknowledgment\\[2mm]
+  3. Receives Completion\\
+  Pulse\\[2mm]
+  4. Fetches Statistical\\
+  Summary
+};
+
+% ==================== CENTER: SERVER ARCHITECTURE ====================
+\node[sblock, text width=3.7cm, minimum height=5.4cm] (mainthr) at (-0.6, 0) {
+  \textbf{IPC \& Slot Manager}\\[2mm]
+  $\bullet$ Registers QNX Service\\
+  $\bullet$ Validates Protocol Header\\
+  \quad \& Checksum Seal\\
+  $\bullet$ Allocates Shared Slot $0..3$\\
+  $\bullet$ Replies Immediate ACK\\
+  $\bullet$ Dispatches Worker Engines\\
+  $\bullet$ Sends Completion Pulse
+};
+
+% Top Engine: Parallel Merge Sort Pool
+\node[eblock, text width=4.6cm, minimum height=2.1cm] (sortpool) at (5.7, 1.55) {
+  \textbf{Parallel Merge Sort Pool}\\
+  4 Worker Threads + 64\,KiB Scratch\\
+  Phase Barrier Synchronization\\
+  4 Slices (4096) $\rightarrow$ 2 Merges $\rightarrow$ 16\,384
+};
+
+% Bottom Engine: Rolling Median Filter
+\node[eblock, text width=4.6cm, minimum height=2.1cm] (medeng) at (5.7, -1.55) {
+  \textbf{Median \& Hampel Filter Engine}\\
+  $\bullet$ Extracts Exact Block Median\\
+  $\bullet$ 9-Sample Sliding Window Filter\\
+  $\bullet$ Replaces Outliers $> 4\sigma$ MAD
+};
+
+\node[groupbox=srvBrd, fit=(mainthr)(sortpool)(medeng),
+      label={[grouplabel, text=srvBrd]above:Server Subsystem Architecture}] (srvbox) {};
+
+% ==================== RIGHT: SHARED MEMORY REGION ====================
+\node[shmblock, text width=4.0cm, minimum height=5.4cm] (shm) at (12.4, 0) {
+  \textbf{POSIX Shared Memory}\\
+  Read/Write Mapping (524\,KiB)\\[2mm]
+  \textbf{Region Header} (24\,B)\\
+  Version \& 4-Slot Directory\\[2mm]
+  \textbf{Slot Layout} (128\,KiB + 16\,B):\\
+  $\bullet$ Slot Header (16\,B):\\
+  \quad Job ID, Length, State Flag\\
+  $\bullet$ Sorted Array (64\,KiB)\\
+  $\bullet$ Filtered Array (64\,KiB)
+};
+
+% ==================== CONNECTIONS ====================
+\draw[ipcboth] ([yshift=1.4cm]client.east) -- node[lbl, above]{Submit / ACK} ([yshift=1.4cm]srvbox.west);
+\draw[ipcarr] ([yshift=0.0cm]srvbox.west) -- node[lbl, above]{Completion Pulse} ([yshift=0.0cm]client.east);
+\draw[ipcboth] ([yshift=-1.4cm]client.east) -- node[lbl, above]{Fetch / Result} ([yshift=-1.4cm]srvbox.west);
+
+\draw[arr] ([yshift=1.55cm]mainthr.east) -- node[lbl, above]{copy 1} (sortpool.west);
+\draw[arr] ([yshift=-1.55cm]mainthr.east) -- node[lbl, above]{copy 2 (raw)} (medeng.west);
+
+\draw[shmarr] ([yshift=1.55cm]srvbox.east) -- node[lbl, above]{sorted output} ([yshift=1.55cm]shm.west);
+\draw[shmarr] ([yshift=-1.55cm]srvbox.east) -- node[lbl, above]{filtered output} ([yshift=-1.55cm]shm.west);
+\draw[shmarr] (mainthr.south) -- ++(0,-0.65) -| node[lbl, above, pos=0.30]{publish slot ready flag + output checksums} (shm.south);
+
+% Legend bar
+\begin{scope}[shift={(-3.5,-4.05)}]
+  \draw[arr] (0,0) -- (0.9,0) node[right, font=\sffamily\scriptsize]{Internal Server Dispatch};
+  \draw[ipcarr] (4.3,0) -- (5.2,0) node[right, font=\sffamily\scriptsize]{QNX IPC Messages \& Pulses};
+  \draw[shmarr] (9.2,0) -- (10.1,0) node[right, font=\sffamily\scriptsize]{Shared Memory Publication};
+\end{scope}
+
+\end{tikzpicture}
+\end{document}

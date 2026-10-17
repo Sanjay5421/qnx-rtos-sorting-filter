@@ -1,0 +1,260 @@
+% ---------------------------------------------------------------------------
+% theme.tex — Graphite & Lime
+%
+% Monospaced frame titles numbered like code listings, square corners, and two
+% accents: lime for structure (rules, frames, bullets, numbers) and a mid blue
+% for figures and diagrams. The base stays neutral, so the colour reads as
+% punctuation rather than decoration.
+%
+% Everything visual lives here. content.tex names no colour and no font.
+% ---------------------------------------------------------------------------
+
+% --- palette ---------------------------------------------------------------
+
+\definecolor{rtmPrimary}{HTML}{23272B}   % graphite   — titles, text, rules
+\definecolor{rtmAccent}{HTML}{5FA800}    % lime       — structure, bullets, frames
+\definecolor{rtmAccentInk}{HTML}{4A8500} % lime, for type on white (readable)
+\definecolor{rtmAccent2}{HTML}{2C7FB8}   % mid blue   — figures, diagrams
+\definecolor{rtmAlert}{HTML}{C9761B}     % amber      — warnings
+\definecolor{rtmGood}{HTML}{2E7D5B}      % green      — results
+\definecolor{rtmInk}{HTML}{23272B}       % body text
+\definecolor{rtmMuted}{HTML}{7A8288}     % captions, footer
+\definecolor{rtmLine}{HTML}{DDE1E3}      % hairlines
+\definecolor{rtmSurface}{HTML}{F1F3F4}   % box fills, code background
+\definecolor{rtmSurface2}{HTML}{EAF4FB}  % figure fill (blue tint)
+
+% --- beamer colours and fonts ----------------------------------------------
+
+\setbeamercolor{normal text}{fg=rtmInk, bg=white}
+\setbeamercolor{structure}{fg=rtmAccentInk}
+\setbeamercolor{frametitle}{fg=rtmPrimary, bg=white}
+\setbeamercolor{title}{fg=rtmPrimary}
+\setbeamercolor{subtitle}{fg=rtmAccent2}
+\setbeamercolor{author}{fg=rtmInk}
+\setbeamercolor{date}{fg=rtmMuted}
+\setbeamercolor{itemize item}{fg=rtmAccentInk}
+\setbeamercolor{itemize subitem}{fg=rtmAccent2}
+\setbeamercolor{enumerate item}{fg=rtmAccentInk}
+\setbeamercolor{alerted text}{fg=rtmAccentInk}
+\setbeamercolor{footline}{fg=rtmMuted}
+\setbeamercolor{block title}{fg=white, bg=rtmPrimary}
+\setbeamercolor{block body}{fg=rtmInk, bg=rtmSurface}
+\setbeamercolor{block title alerted}{fg=white, bg=rtmAlert}
+\setbeamercolor{block body alerted}{fg=rtmInk, bg=rtmSurface}
+\setbeamercolor{block title example}{fg=white, bg=rtmGood}
+\setbeamercolor{block body example}{fg=rtmInk, bg=rtmSurface}
+
+\setbeamerfont{frametitle}{family=\ttfamily, size=\large, series=\bfseries}
+\setbeamerfont{title}{size=\LARGE, series=\bfseries}
+\setbeamerfont{subtitle}{size=\large}
+\setbeamerfont{author}{size=\small}
+\setbeamerfont{footline}{family=\ttfamily, size=\tiny}
+\setbeamerfont{caption}{size=\scriptsize}
+
+% Leading. Several frames carry 4-5 long bullets and ran a few millimetres past
+% the bottom of the frame; the text is right, the line spacing was simply too
+% generous for the amount of it. Tightened once here rather than frame by frame,
+% so a later edit to a slide does not reintroduce the overflow.
+\linespread{0.87}\selectfont
+
+% Lists carry most of the deck, so their spacing is tightened once, here,
+% rather than per slide. Beamer's defaults are generous for projection.
+\setbeamertemplate{itemize/enumerate body begin}{\vskip0.4mm}
+\setbeamertemplate{itemize/enumerate subbody begin}{\vskip0pt}
+
+% --- frame chrome ----------------------------------------------------------
+
+\useinnertheme{default}
+\useoutertheme{default}
+\setbeamertemplate{navigation symbols}{}
+\setbeamersize{text margin left=8mm, text margin right=8mm}
+
+% "d.03" in lime, then the title in monospace, with a lime rule under it.
+% The vertical skips are kept tight on purpose: this block is on every frame,
+% and the height it costs is height the content does not get.
+\setbeamertemplate{frametitle}{%
+  \vskip1.6mm%
+  {\usebeamerfont{frametitle}%
+   {\color{rtmAccentInk}\bfseries d.\insertframenumber}\hskip1.4em%
+   \usebeamercolor[fg]{frametitle}\insertframetitle\par}%
+  \vskip1.1mm%
+  {\color{rtmAccent!55!white}\hrule height 1pt}%
+  \vskip1.1mm%
+}
+
+\setbeamertemplate{footline}{%
+  {\color{rtmAccent!35!white}\hrule height 0.6pt}%
+  \hbox to\paperwidth{%
+    \hskip8mm%
+    {\usebeamerfont{footline}\usebeamercolor[fg]{footline}%
+      \insertshortauthor\hskip1.5em\insertshorttitle}%
+    \hfill%
+    {\usebeamerfont{footline}%
+      {\color{rtmAccentInk}\bfseries[\insertframenumber]}%
+      {\color{rtmMuted}/\inserttotalframenumber}}%
+    \hskip8mm%
+  }%
+  \vskip2.2mm%
+}
+
+% --- title page ------------------------------------------------------------
+
+\setbeamertemplate{title page}{%
+  \begin{tikzpicture}[remember picture, overlay]
+    \fill[rtmPrimary]
+      (current page.north west) rectangle ([yshift=-6mm]current page.north east);
+    \fill[rtmAccent]
+      ([yshift=-6mm]current page.north west) rectangle ([yshift=-7.6mm]current page.north east);
+    \node[anchor=north west, inner sep=0pt, text width=0.84\paperwidth]
+      at ([xshift=8mm, yshift=-19mm]current page.north west) {%
+        {\color{rtmMuted}\ttfamily\footnotesize\bfseries\insertinstitute}\par
+        \vskip4mm
+        {\color{rtmPrimary}\LARGE\bfseries\inserttitle}\par
+        \vskip3mm
+        {\color{rtmAccent}\hrule height 2pt width 26mm}\par
+        \vskip3mm
+        {\color{rtmAccent2}\large\insertsubtitle}\par
+      };
+    \node[anchor=south west, inner sep=0pt, text width=0.84\paperwidth]
+      at ([xshift=8mm, yshift=14mm]current page.south west) {%
+        {\color{rtmInk}\ttfamily\small\authorsBlock}\par
+        \vskip2mm
+        {\color{rtmMuted}\ttfamily\small\insertdate}\par
+      };
+    \fill[rtmAccent]
+      ([yshift=7mm]current page.south west) rectangle ([yshift=6.2mm]current page.south east);
+  \end{tikzpicture}%
+}
+
+% --- section pages ---------------------------------------------------------
+
+\AtBeginSection[]{%
+  \begin{frame}[plain]
+    \vfill
+    {\color{rtmAccentInk}\ttfamily\bfseries PART \insertsectionnumber}\par
+    \vskip2mm
+    {\color{rtmPrimary}\LARGE\bfseries\insertsectionhead}\par
+    \vskip3mm
+    {\color{rtmAccent2}\hrule height 1.2pt width 30mm}\par
+    \vfill
+  \end{frame}%
+}
+
+% --- boxes -----------------------------------------------------------------
+
+\newtcolorbox{highlight}[1][]{%
+  enhanced, breakable, colback=rtmSurface, colframe=rtmAccent,
+  boxrule=0pt, leftrule=3pt, arc=0pt, outer arc=0pt,
+  left=2.5mm, right=2mm, top=1.6mm, bottom=1.6mm, fontupper=\footnotesize, #1}
+
+\newtcolorbox{tech}[1][]{%
+  enhanced, breakable, colback=rtmSurface2, colframe=rtmAccent2,
+  boxrule=0pt, leftrule=3pt, arc=0pt, outer arc=0pt,
+  left=2.5mm, right=2mm, top=1.6mm, bottom=1.6mm, fontupper=\footnotesize, #1}
+
+\newtcolorbox{warn}[1][]{%
+  enhanced, breakable, colback=rtmSurface, colframe=rtmAlert,
+  boxrule=0pt, leftrule=3pt, arc=0pt, outer arc=0pt,
+  left=2.5mm, right=2mm, top=1.6mm, bottom=1.6mm, fontupper=\footnotesize, #1}
+
+% --- tables, code, diagrams, macros ----------------------------------------
+
+\setbeamertemplate{caption}[numbered]
+\newcommand{\rtmtablehead}[1]{{\color{rtmPrimary}\bfseries #1}}
+\renewcommand{\arraystretch}{1.15}
+
+% Wide tables: wrap in \fitwidth{...} so a table that would run past its column
+% is scaled down to fit instead of overlapping the neighbouring column. The
+% natural width is kept when it already fits, so crisp type is not shrunk for
+% nothing.
+\newcommand{\fitwidth}[1]{%
+  \resizebox{\ifdim\width>\linewidth \linewidth\else\width\fi}{!}{#1}}
+
+\lstdefinestyle{rtmc}{%
+  language=C,
+  basicstyle=\ttfamily\tiny,
+  keywordstyle=\color{rtmAccentInk}\bfseries,
+  commentstyle=\color{rtmMuted}\itshape,
+  stringstyle=\color{rtmAccent2},
+  numberstyle=\ttfamily\tiny\color{rtmMuted},
+  backgroundcolor=\color{rtmSurface2},
+  frame=none, framesep=1.5mm, xleftmargin=2mm,
+  aboveskip=1.5mm, belowskip=1.5mm,
+  showstringspaces=false, breaklines=true,
+  columns=fullflexible, keepspaces=true, upquote=true,
+}
+\lstset{style=rtmc}
+
+% Square corners, matched to the monospaced chrome. Two accents, so a diagram
+% can distinguish a plain step from the step that matters.
+\tikzset{
+  node distance=6mm and 9mm,
+  block/.style={rectangle, draw=rtmAccent2, line width=0.6pt,
+                fill=rtmSurface2, text=rtmInk, align=center,
+                inner xsep=2.4mm, inner ysep=1.6mm, font=\scriptsize},
+  accent block/.style={block, draw=rtmAccentInk, line width=0.8pt, fill=rtmAccent!14},
+  muted block/.style={block, draw=rtmMuted, line width=0.5pt,
+                      fill=rtmSurface, text=rtmMuted},
+  flow/.style={-{Latex[length=1.6mm]}, draw=rtmAccent2, line width=0.7pt},
+  flow dashed/.style={flow, draw=rtmAccentInk, dashed},
+  edge label/.style={font=\scriptsize, text=rtmMuted, inner sep=1pt},
+}
+
+\newcommand{\concept}[2][rtmAccentInk]{{\color{#1}\bfseries #2}}
+\newcommand{\num}[1]{\textcolor{rtmAccentInk}{\bfseries #1}}
+
+% Dense slides: some frames carry four or five long bullets and would run past
+% the bottom of the frame at the default list spacing. \compactitem drops
+% beamer's intra-list skips for the list that follows, and \smalltext sets the
+% list in the next size down. Both are layout-only — no text changes.
+\newcommand{\compactitem}{%
+  \setbeamertemplate{itemize/enumerate body begin}{\vskip0pt}%
+  \setbeamertemplate{itemize/enumerate subbody begin}{\vskip0pt}%
+  \setbeamertemplate{itemize/enumerate subsubbody begin}{\vskip0pt}}
+\newcommand{\smalltext}{\small}
+
+% \tighten — a little negative space, for a frame whose list still runs a few
+% millimetres past the bottom after the two above.
+\newcommand{\tighten}{\vspace{-4mm}}
+
+% \key{…} — a short label in a filled pill, for a slide's takeaway.
+% The node is bounded by both the text width and the column width: a long
+% label wraps instead of running off the right edge of the slide.
+\newcommand{\key}[1]{%
+  \tikz[baseline=(k.base)]\node[fill=rtmAccentInk, text=white, rounded corners=1pt,
+    inner xsep=2mm, inner ysep=0.8mm, text width=\dimexpr\linewidth-4.8mm\relax,
+    align=left, font=\ttfamily\scriptsize\bfseries] (k) {#1};}
+
+% One line naming the theme, on the preview slides only. Empty in the real deck.
+\newcommand{\themeSignature}{%
+  \vfill
+  {\color{rtmMuted}\ttfamily\scriptsize\bfseries
+   GRAPHITE \& LIME \textbullet{} monospaced titles, square boxes, lime and blue accents}\par}
+
+% --- closing slide ---------------------------------------------------------
+
+\newcommand{\closingSlide}{%
+  \begin{frame}[plain]
+    \begin{tikzpicture}[remember picture, overlay]
+      \fill[rtmPrimary]
+        (current page.north west) rectangle ([yshift=-0.46\paperheight]current page.north east);
+      \fill[rtmAccent]
+        ([yshift=-0.46\paperheight]current page.north west)
+        rectangle ([yshift=-0.478\paperheight]current page.north east);
+      \node[anchor=north west, inner sep=0pt, text width=0.84\paperwidth]
+        at ([xshift=8mm, yshift=-14mm]current page.north west) {%
+          {\color{rtmAccent}\ttfamily\footnotesize\bfseries THANK YOU}\par
+          \vskip5mm
+          {\color{white}\Large\bfseries\inserttitle}\par
+        };
+      \node[anchor=south west, inner sep=0pt, text width=0.84\paperwidth]
+        at ([xshift=8mm, yshift=12mm]current page.south west) {%
+          {\color{rtmInk}\ttfamily\small\authOne}\par
+          {\color{rtmInk}\ttfamily\small\authTwo}\par
+          {\color{rtmInk}\ttfamily\small\authThree}\par
+          \vskip2mm
+          {\color{rtmAccent2}\ttfamily\scriptsize\insertsubtitle}\par
+        };
+    \end{tikzpicture}%
+  \end{frame}%
+}

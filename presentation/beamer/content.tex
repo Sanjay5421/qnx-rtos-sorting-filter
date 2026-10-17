@@ -1,0 +1,1111 @@
+% ---------------------------------------------------------------------------
+% content.tex — the presentation slides
+%
+% Structure:
+%   1. Introduction (What the service does, Why median vs average, Core rules)
+%   2. System Architecture & Workflows (Block diagram, client/server flowcharts)
+%   3. Implementation (Protocol, Virtual Sensor, Block Loader, Parallel Merge Sort)
+%   4. Dataset & File Format (PyBaMM data, One-time Planar vs Interleaved note, Interleaved layout)
+%   5. Dedicated Module Testbenches (What it does, How it's done, Output for each module)
+%   6. Two-Fold Verification & Results (Host tests, Target QNX console results, Core scaling sweep)
+%   7. Applications & Conclusion
+% ---------------------------------------------------------------------------
+
+% ==== 1. Title ==============================================================
+
+\begin{frame}[plain]
+  \titlepage
+\end{frame}
+
+% ==== 2. Outline ============================================================
+
+\begin{frame}{Outline}
+  \vfill
+  \begin{columns}[c, onlytextwidth]
+    \begin{column}{0.48\textwidth}
+      \tableofcontents[sections={1-3}]
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \tableofcontents[sections={4-7}]
+    \end{column}
+  \end{columns}
+  \vfill
+\end{frame}
+
+% ===========================================================================
+\section{Introduction}
+% ===========================================================================
+
+\begin{frame}{What the Service Does in One Breath}
+  \begin{columns}[t, onlytextwidth]
+    \begin{column}{0.53\textwidth}
+      \smalltext\compactitem
+      A \concept{client} reads a continuous stream of floating-point sensor numbers, packs them into \textbf{64 KiB crates} (16\,384 numbers each), and hands each crate to a \concept{server} over QNX message passing.
+      \vskip1mm
+      For every crate, the server does two jobs:
+      \begin{itemize}
+        \item \textbf{Parallel Merge Sort}: Sorts a copy of the 16\,384 numbers across worker threads to find the exact block median and range.
+        \item \textbf{Rolling Median Filter}: Slides a small odd-width window across the time-ordered numbers to strip out one-off sensor spikes.
+      \end{itemize}
+      \vskip1mm
+      When done, the server sends a \concept{QNX pulse} so the client never has to sit waiting.
+    \end{column}
+    \begin{column}{0.44\textwidth}
+      \smalltext\compactitem
+      \begin{highlight}
+        \textbf{Quick Vocabulary}
+        \begin{itemize}
+          \item \textbf{Sample}: One \texttt{float} reading (4 B), e.g.\ \texttt{3.71 V}.
+          \item \textbf{Record}: One moment holding all 4 channels (16 B).
+          \item \textbf{Frame}: 128 samples returned per sensor read.
+          \item \textbf{Block}: 16\,384 samples = 64 KiB sent at once.
+        \end{itemize}
+      \end{highlight}
+      \vskip0.5mm
+      \begin{tech}
+        \textbf{Course Rules Met} \\
+        QNX synchronous \texttt{MsgSendv}, $\ge$\,64 KiB payload per transfer, multi-threaded sort, and async pulse notification.
+      \end{tech}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{Why a Median Filter Instead of an Average?}
+  \begin{columns}[t, onlytextwidth]
+    \begin{column}{0.50\textwidth}
+      Suppose a battery sensor sits at 5.0 V, and one loose-wire glitch makes a single reading jump to 50.0 V:
+      \vskip1mm
+      \begin{center}
+      \fitwidth{%
+      \begin{tabular}{@{}lccc@{}}
+        \toprule
+        \rtmtablehead{5 Readings in Window} & \rtmtablehead{Average} & \rtmtablehead{Median} & \rtmtablehead{Real Value} \\
+        \midrule
+        5.0, 5.0, 5.0, 5.0, 5.0   & 5.0 V  & 5.0 V & 5.0 V \\
+        5.0, 5.0, 5.0, 5.0, 50.0  & \num{14.0 V} & \num{5.0 V} & 5.0 V \\
+        \bottomrule
+      \end{tabular}}
+      \end{center}
+      \vskip1mm
+      A moving average gets pulled from 5 V up to \textbf{14 V} by one bad reading. The \textbf{median} sorts the 5 numbers and picks the middle one — still \textbf{5.0 V}.
+    \end{column}
+    \begin{column}{0.47\textwidth}
+      \smalltext\compactitem
+      \begin{itemize}
+        \item \textbf{Why an odd window width?} With 3, 5, or 7 samples, there is always one exact middle sample after sorting the window.
+        \item \textbf{Why keep a separate copy?} Sorting the whole 16\,384-sample block destroys time order. The rolling median filter must run on the original time-ordered sequence.
+        \item \textbf{Why do both?} Full-block sort gives overall percentiles (min, median, max); the rolling filter gives a clean, spike-free waveform.
+      \end{itemize}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{How the Modules Fit Together}
+  \begin{columns}[t, onlytextwidth]
+    \begin{column}{0.49\textwidth}
+      \smalltext\compactitem
+      \begin{tech}
+        \textbf{Input Pipeline \& IPC Layer}
+        \begin{itemize}
+          \item \texttt{protocol.h} \& \texttt{shm\_region.c}: Define the 64 KiB block, shipping label, FNV-1a seal, IPC messages, and \texttt{/sortmed-results} shared memory.
+          \item \texttt{sensor.c} \& \texttt{block\_loader.c}: Stream the binary recording through a 4096-record window and pack 16\,384-sample crates.
+          \item \texttt{client.c} \& \texttt{server.c}: Send blocks via \texttt{MsgSendv}, notify via pulse, and read results from shared memory.
+        \end{itemize}
+      \end{tech}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \smalltext\compactitem
+      \begin{highlight}
+        \textbf{Sorting \& Filtering Engines}
+        \begin{itemize}
+          \item \texttt{mergesort.c}: Splits each 16\,384-sample block across POSIX worker threads to sort and extract the median.
+          \item \texttt{median.c}: Runs a Hampel rolling median filter across the time-ordered copy to strip impulse spikes while leaving clean curves untouched.
+        \end{itemize}
+      \end{highlight}
+      \vskip1mm
+      \key{One copy is sorted for percentiles; a separate copy is filtered in time order}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===========================================================================
+\section{System Architecture}
+% ===========================================================================
+
+\systemOverviewSlide
+
+% ---------------------------------------------------------------------------
+\clientFlowchartSlide
+
+% ---------------------------------------------------------------------------
+\serverFlowchartSlide
+
+% ---------------------------------------------------------------------------
+\dataFlowSlide
+
+% ===========================================================================
+\section{Implementation}
+% ===========================================================================
+
+\begin{frame}{How the Virtual Sensor Works (\texttt{app/sensor.c})}
+  \begin{columns}[t, onlytextwidth]
+    \begin{column}{0.52\textwidth}
+      \smalltext\compactitem
+      \texttt{sensor.c} wraps the binary recording on disk and makes it behave like live hardware:
+      \begin{itemize}
+        \item \textbf{Checks file on open}: Verifies byte size is a multiple of $4\text{ floats} \times 4\text{ B} = 16\text{ B}$. Rejects bad rates, zero strides, or invalid offsets right away.
+        \item \textbf{4096-record sliding window}: Keeps only 4096 records in RAM and refills via \texttt{fread()} when the cursor walks past the window.
+        \item \textbf{128-sample frames}: Like a hardware ADC FIFO, \texttt{sensor\_read()} returns at most 128 samples per call.
+        \item \textbf{Paced or unpaced}: \texttt{sensor\_read\_paced()} sleeps against \texttt{CLOCK\_MONOTONIC} to match real-time Hz; unpaced reads run at full CPU speed.
+      \end{itemize}
+    \end{column}
+    \begin{column}{0.45\textwidth}
+      \smalltext\compactitem
+      \begin{highlight}
+        \textbf{Picking Voltage from 4 Channels} \\
+        Each record stores \texttt{[Time, Voltage, Current, Temp]}. To read only Voltage, we open with \textbf{\texttt{stride = 4, offset = 1}}: step by 4 floats, always pick slot 1.
+      \end{highlight}
+      \vskip0.5mm
+      \begin{tech}
+        \textbf{Drift-Free Sensor Timestamp} \\
+        Computed directly from the sample counter:
+        $t_{\text{ns}} = (\text{delivered} \times 10^9) / \text{rate\_hz}$.
+        At 100 Hz, sample 100 is always $1.000\text{ s}$, unaffected by OS sleep jitter.
+      \end{tech}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}[fragile]{Virtual Sensor: Line-by-Line Code Walkthrough}
+  \begin{columns}[t, onlytextwidth]
+    \begin{column}{0.52\textwidth}
+\begin{lstlisting}
+/* Inside sensor_read() in app/sensor.c */
+while (n < cap) {
+    if (s->window_count == 0 ||
+        s->next < s->window_first ||
+        s->next >= s->window_first + s->window_count) {
+        if (sensor_fill(s, s->next) != 0)
+            return (n > 0) ? (int)n : -1;
+    }
+    size_t off = (s->next - s->window_first) *
+                 s->cfg.stride + s->cfg.offset;
+    dst[n++] = s->window[off];
+    s->next++;
+    s->delivered++;
+}
+\end{lstlisting}
+      {\scriptsize \texttt{cap} is capped at one 128-sample frame per read call.}
+    \end{column}
+    \begin{column}{0.45\textwidth}
+      \smalltext\compactitem
+      \begin{itemize}
+        \item \textbf{Lines 3--5 (Window check)}: Is our next sample index \texttt{s->next} outside the 4096 records currently in RAM?
+        \item \textbf{Lines 6--7 (\texttt{sensor\_fill})}: If outside, seek the file to \texttt{s->next} and \texttt{fread()} the next 4096-record chunk into \texttt{s->window}.
+        \item \textbf{Lines 9--10 (Pick channel)}: With \texttt{stride=4, offset=1}, sample $0,1,2\dots$ reads window index $1, 5, 9\dots$ (only the Voltage floats).
+        \item \textbf{Lines 11--13 (Deliver \& advance)}: Copy float into \texttt{dst}, advance file cursor \texttt{s->next}, and bump \texttt{s->delivered} (clock counter).
+      \end{itemize}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{How the Block Loader Works (\texttt{app/block\_loader.c})}
+  \begin{columns}[t, onlytextwidth]
+    \begin{column}{0.51\textwidth}
+      \smalltext\compactitem
+      The sensor hands out small 128-sample frames, while the server expects full \textbf{16\,384-sample (64 KiB) blocks}. \texttt{block\_loader.c} bridges the two:
+      \begin{itemize}
+        \item \textbf{Single place for channel offsets}: \texttt{block\_loader\_channel\_offset()} maps channel names to their slot in the 4-float record:
+        \vskip0.5mm
+        {\scriptsize \texttt{VOLTAGE $\rightarrow$ 1,\quad CURRENT $\rightarrow$ 2,\quad TEMP $\rightarrow$ 3}}
+        \item \textbf{Gathers frames into a crate}: Loops over \texttt{sensor\_read()} until 16\,384 samples are collected (128 frames) or the file ends.
+        \item \textbf{Fills out the shipping label}: Scans the collected samples for \texttt{min\_val} and \texttt{max\_val}, sets \texttt{seq}, and stamps the FNV-1a checksum.
+      \end{itemize}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \smalltext\compactitem
+      \begin{highlight}
+        \textbf{What happens on the 4th block?} \\
+        60\,000 samples $= 3 \times 16\,384 + \mathbf{10\,848}$. \\
+        The 4th block has 10\,848 real readings. The loader zeroes the remaining \textbf{5\,536 slots} so leftover RAM garbage never crosses processes.
+      \end{highlight}
+      \vskip0.5mm
+      \begin{tech}
+        \textbf{Why checksum only \texttt{desc->samples}?} \\
+        The seal hashes only the \textbf{10\,848 real samples}, not the 5\,536 padding zeros, so the server sorts and medians only real battery readings.
+      \end{tech}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}[fragile]{Block Loader: Line-by-Line Code Walkthrough}
+  \begin{columns}[t, onlytextwidth]
+    \begin{column}{0.52\textwidth}
+\begin{lstlisting}
+/* Inside block_loader_next() in block_loader.c */
+got = sensor_read_block(l->sensor,
+                        block->samples,
+                        PROTO_BLOCK_SAMPLES);
+if (got <= 0) return got;
+
+if ((uint32_t)got < PROTO_BLOCK_SAMPLES) {
+    memset(&block->samples[got], 0,
+           (PROTO_BLOCK_SAMPLES - got) * sizeof(float));
+}
+desc->samples  = (uint32_t)got;
+desc->checksum = proto_checksum_block(block->samples,
+                                      desc->samples);
+\end{lstlisting}
+      {\scriptsize \texttt{PROTO\_BLOCK\_SAMPLES} $= 16\,384$. Produces a clean 64 KiB crate + label.}
+    \end{column}
+    \begin{column}{0.45\textwidth}
+      \smalltext\compactitem
+      \begin{itemize}
+        \item \textbf{Lines 2--4 (\texttt{sensor\_read\_block})}: Pulls 128-sample frames until \texttt{block->samples} holds 16\,384 floats (or hits EOF). Returns count \texttt{got}.
+        \item \textbf{Line 5 (EOF / Error check)}: Returns 0 when the recording finishes, or $<0$ on read error.
+        \item \textbf{Lines 7--10 (Zero-pad short block)}: When \texttt{got} is $10\,848$ on the last crate, \texttt{memset} zeroes indices $10\,848..16\,383$ so all 65\,536 B are clean.
+        \item \textbf{Lines 11--13 (Record count \& seal)}: Stores \texttt{got} in \texttt{desc->samples} and hashes only those \texttt{got} floats into \texttt{desc->checksum}.
+      \end{itemize}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{Protocol Conversation Between Client \& Server}
+  \begin{columns}[t, onlytextwidth]
+    \begin{column}{0.52\textwidth}
+      \texttt{app/protocol.h} defines the 5 messages used across QNX IPC:
+      \vskip1mm
+      \begin{center}
+      \fitwidth{%
+      \begin{tabular}{@{}lll@{}}
+        \toprule
+        \rtmtablehead{Step / Message} & \rtmtablehead{Size} & \rtmtablehead{What Happens} \\
+        \midrule
+        1. \texttt{SUBMIT + BLOCK} & 48 B + 64 KiB & Client sends label + crate (2-part IOV) \\
+        2. \texttt{ACK}            & 8 B           & Server checks seal, replies right away \\
+        3. \texttt{PULSE} (code 16)& 1 B code      & Server taps client when sort finishes \\
+        4. \texttt{FETCH}          & 8 B           & Client asks for finished job's numbers \\
+        5. \texttt{RESULT}         & 48 B          & Server returns median, min/max, offsets \\
+        \bottomrule
+      \end{tabular}}
+      \end{center}
+    \end{column}
+    \begin{column}{0.45\textwidth}
+      \smalltext\compactitem
+      \begin{highlight}
+        \textbf{Why reply with \texttt{ACK} before sorting?} \\
+        In QNX, \texttt{MsgSendv} blocks the client until the server calls \texttt{MsgReply}. Replying with \texttt{ACK} immediately lets the client keep reading the sensor while workers sort.
+      \end{highlight}
+      \vskip0.5mm
+      \begin{tech}
+        \textbf{Compile-Time Safety Guards} \\
+        \texttt{STATIC\_ASSERT} pins \texttt{sizeof(proto\_block\_t)} to 65\,536 B. Message IDs start at \texttt{0x1000}, well above QNX system messages (\texttt{0x000}--\texttt{0x1FF}).
+      \end{tech}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{Protocol Definition: Shared Results Region}
+  \begin{columns}[t, onlytextwidth]
+    \begin{column}{0.54\textwidth}
+      The pulse only says \emph{a job is done}; the arrays are handed over in a
+      \concept{named shared region}, defined in the same header:
+      \vskip1mm
+      \fitwidth{%
+      \begin{tabular}{@{}lll@{}}
+        \toprule
+        \rtmtablehead{Part} & \rtmtablehead{Size} & \rtmtablehead{Contents} \\
+        \midrule
+        region header & 24 B & magic, version, slot count \\
+        slot header   & 16 B & job id, state word \\
+        sorted[]      & 64 KiB & the sorted block \\
+        filtered[]    & 64 KiB & the time-ordered copy \\
+        \bottomrule
+      \end{tabular}}
+      \vskip1.5mm
+      {\footnotesize Region \texttt{/sortmed-results}: one header plus
+       \num{4} slots, so four results can be in flight.}
+    \end{column}
+    \begin{column}{0.43\textwidth}
+      \begin{tech}
+        \textbf{A state word, not a lock} \\
+        The server publishes a slot by writing \texttt{WR2D} to its state word.
+        A slot still reading \texttt{FREE} has not been written. The client
+        re-reads that one word — no mutex is shared across the programs.
+      \end{tech}
+      \vskip1.5mm
+      \begin{highlight}
+        \textbf{The result points, it does not carry} \\
+        \texttt{proto\_result\_t} holds \texttt{sorted\_offset},
+        \texttt{filtered\_offset}, \texttt{length}, and two checksums, all
+        32-bit. Offset 0 means ``not produced''.
+      \end{highlight}
+      \vskip1mm
+      {\footnotesize Three tests pin the region: its name, its layout, and
+       that the result describes it.}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{How Parallel Merge Sort Splits \& Merges (\texttt{mergesort.c})}
+  \begin{columns}[t, onlytextwidth]
+    \begin{column}{0.53\textwidth}
+      \smalltext\compactitem
+      How a 16\,384-sample crate is sorted across \textbf{4 worker threads}:
+      \begin{itemize}
+        \item \textbf{How many slices?}: $k = \min(n / 1024,\, \text{threads})$ $\rightarrow$ \textbf{4 slices} of \textbf{4\,096 samples} each. (Blocks $<4096$ run on 1 thread.)
+        \item \textbf{Phase 0 — Sort 4 slices (4 tasks)}: All 4 workers run in parallel, sorting their 4\,096-sample slice into scratch.
+        \item \textbf{Phase 1 — First merge (2 tasks)}: Two workers merge pairs of 4\,096 into two runs of \textbf{8\,192} in the main buffer.
+        \item \textbf{Phase 2 — Final merge (1 task)}: One worker merges the two 8\,192 runs into the final \textbf{16\,384} sorted array.
+      \end{itemize}
+      {\scriptsize Total plan: \textbf{4 partitions, 2 merge phases, 7 tasks ($4 + 2 + 1$)}.}
+    \end{column}
+    \begin{column}{0.44\textwidth}
+      \smalltext\compactitem
+      \begin{highlight}
+        \textbf{Ping-Pong Scratch Buffer} \\
+        One 64 KiB scratch buffer is allocated when the pool starts. Phases bounce between \texttt{buf\_a} and \texttt{buf\_b} with zero per-job \texttt{malloc}.
+      \end{highlight}
+      \vskip0.5mm
+      \begin{tech}
+        \textbf{Thread-Invariant Output} \\
+        When merging two halves, ties always pick from the left half (\texttt{a[i] <= b[j]}). Output is \textbf{bit-for-bit identical} across 1, 2, 4, and 8 threads.
+      \end{tech}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}[fragile]{Parallel Merge Sort: Line-by-Line Code Walkthrough}
+  \begin{columns}[t, onlytextwidth]
+    \begin{column}{0.53\textwidth}
+\begin{lstlisting}
+/* 1. Manager posts a phase & waits (mergesort.c) */
+static void post_phase(mergesort_pool_t *p, unsigned ntasks) {
+    pthread_mutex_lock(&p->lock);
+    p->ntasks = ntasks; p->next_task = 0; p->tasks_done = 0;
+    pthread_cond_broadcast(&p->work_ready);
+    while (p->tasks_done < p->ntasks)
+        pthread_cond_wait(&p->phase_done, &p->lock);
+    pthread_mutex_unlock(&p->lock);
+}
+/* 2. Inside each worker thread loop */
+unsigned idx = p->next_task++;
+mergesort_task_t t = p->tasks[idx];
+pthread_mutex_unlock(&p->lock);
+run_task(&t); /* sorts/merges unlocked in parallel */
+pthread_mutex_lock(&p->lock);
+if (++p->tasks_done == p->ntasks)
+    pthread_cond_signal(&p->phase_done);
+\end{lstlisting}
+    \end{column}
+    \begin{column}{0.44\textwidth}
+      \smalltext\compactitem
+      \begin{itemize}
+        \item \textbf{Lines 3--5 (Publish phase)}: Locks mutex, sets \texttt{ntasks} (4, then 2, then 1), resets counters, and broadcasts \texttt{work\_ready}.
+        \item \textbf{Lines 6--7 (Phase barrier)}: Manager sleeps on \texttt{phase\_done} until all tasks in this phase finish.
+        \item \textbf{Lines 11--14 (Parallel work)}: Worker claims ticket \texttt{next\_task++}, \textbf{unlocks mutex immediately}, and runs \texttt{run\_task()} on its core.
+        \item \textbf{Lines 15--17 (Wake manager)}: Last finisher (\texttt{tasks\_done == ntasks}) signals \texttt{phase\_done} to advance phases.
+      \end{itemize}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{How the Rolling Median Filter Works (\texttt{app/median.c})}
+  \begin{columns}[t, onlytextwidth]
+    \begin{column}{0.52\textwidth}
+      \smalltext\compactitem
+      \texttt{median.c} computes both the sorted-array median and a \textbf{Hampel rolling median filter} on the time-ordered signal:
+      \begin{itemize}
+        \item \textbf{Centered odd window}: Slides an odd window (default \texttt{width = 9}, range $3..31$) across the original samples.
+        \item \textbf{Window median \& MAD}: Orders the small window on the stack via insertion sort to get the local \texttt{median} and the median absolute deviation (\texttt{mad}).
+        \item \textbf{Replaces only true spikes}: Converts MAD to robust sigma ($\sigma = 1.4826 \times \text{MAD}$). Replaces a sample \textbf{only} if it exceeds $4\sigma$ from the window median; clean samples pass through untouched.
+      \end{itemize}
+    \end{column}
+    \begin{column}{0.45\textwidth}
+      \smalltext\compactitem
+      \begin{highlight}
+        \textbf{Why Hampel Instead of Plain Median?} \\
+        A plain median replaces every point and rounds off clean voltage ramps. Hampel replaces only the $10$--$40\sigma$ spikes and leaves clean readings bit-exact.
+      \end{highlight}
+      \vskip0.5mm
+      \begin{tech}
+        \textbf{Seamless Block Boundaries} \\
+        Accepts up to \texttt{(width-1)/2} neighbour samples (\texttt{left}, \texttt{right}) so block seams produce the exact same output as filtering the whole recording at once.
+      \end{tech}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}[fragile]{Rolling Median Filter: Line-by-Line Code Walkthrough}
+  \begin{columns}[t, onlytextwidth]
+    \begin{column}{0.53\textwidth}
+\begin{lstlisting}
+/* Inside median_filter_block() in app/median.c */
+for (k = 0; k < count; k++)
+    window[k] = sample_at(lo + (ptrdiff_t)k, left,
+                          (ptrdiff_t)nleft, cur, (ptrdiff_t)n, right);
+sort_small(window, count);
+median = middle_of(window, count);
+
+for (k = 0; k < count; k++)
+    deviation[k] = fabsf(window[k] - median);
+sort_small(deviation, count);
+mad = middle_of(deviation, count);
+
+if (fabsf(centre - median) >
+    cfg->threshold * MEDIAN_MAD_TO_SIGMA * mad) {
+    out[i] = median;
+    replaced++;
+} else {
+    out[i] = centre;
+}
+\end{lstlisting}
+    \end{column}
+    \begin{column}{0.44\textwidth}
+      \smalltext\compactitem
+      \begin{itemize}
+        \item \textbf{Lines 2--6 (Window median)}: Copies the 9-sample neighborhood around \texttt{cur[i]} into \texttt{window[]}, insertion-sorts it (\texttt{sort\_small}), and picks the middle value.
+        \item \textbf{Lines 8--11 (Compute MAD)}: Measures each neighbor's distance \texttt{|x - median|}, sorts those distances, and takes their middle value (\texttt{mad}).
+        \item \textbf{Lines 13--18 (Spike test)}: If \texttt{centre} is further than \texttt{4.0 * 1.4826 * mad}, replaces it with \texttt{median} and bumps \texttt{replaced}; otherwise keeps \texttt{centre}.
+      \end{itemize}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{How the QNX Server \& Client Work (\texttt{server.c}, \texttt{client.c})}
+  \begin{columns}[t, onlytextwidth]
+    \begin{column}{0.51\textwidth}
+      \smalltext\compactitem
+      \textbf{Server (\texttt{sortmed-server}):}
+      \begin{itemize}
+        \item Creates \texttt{/sortmed-results} shared memory (\texttt{shm\_region\_create}) and attaches channel \texttt{"sortmed"}.
+        \item Receives \texttt{\{submit, block\}} via \texttt{MsgReceivev}, verifies checksum, and replies \texttt{ACK} immediately.
+        \item Sorts one copy in shared memory via \texttt{ms\_sort()}, filters a second copy via \texttt{median\_filter\_block()}, marks slot \texttt{WR2D}, and sends pulse code 16.
+      \end{itemize}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \smalltext\compactitem
+      \textbf{Client (\texttt{sortmed-client}):}
+      \begin{itemize}
+        \item Attaches \texttt{"sortmed-client"} for pulses and maps \texttt{/sortmed-results} read-only.
+        \item Sends each 64 KiB block with \texttt{MsgSendv}, waits for the completion pulse, and sends \texttt{FETCH}.
+        \item Verifies slot state \texttt{WR2D}, bounds, and FNV-1a checksums, then writes \texttt{raw.bin}, \texttt{sorted.bin}, \texttt{filtered.bin}, and \texttt{medians.csv}.
+      \end{itemize}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}[fragile]{Server Job Processing: Line-by-Line Code Walkthrough}
+  \begin{columns}[t, onlytextwidth]
+    \begin{column}{0.53\textwidth}
+\begin{lstlisting}
+/* Inside process_submit() in app/server.c */
+slot->state = PROTO_SLOT_FREE;
+memcpy(sorted, block->samples, n * sizeof(float));
+if (ms_sort(pool, sorted, n) != 0) return -1;
+
+median_config_default(&cfg);
+if (median_filter_block(&cfg, NULL, 0, block->samples, n,
+                        NULL, 0, filtered, &outliers) != 0)
+    return -1;
+
+job->result.median = median_of_sorted(sorted, n);
+job->result.outliers_removed = outliers;
+job->result.sorted_checksum =
+    proto_checksum(sorted, n * sizeof(float));
+job->result.filtered_checksum =
+    proto_checksum(filtered, n * sizeof(float));
+slot->state = PROTO_SLOT_WRITTEN; /* 'WR2D' */
+\end{lstlisting}
+    \end{column}
+    \begin{column}{0.44\textwidth}
+      \smalltext\compactitem
+      \begin{itemize}
+        \item \textbf{Lines 2--4 (Sort copy in shm)}: Marks slot \texttt{FREE}, copies raw samples into the slot's \texttt{sorted[]} array, and runs the 4-worker parallel merge sort.
+        \item \textbf{Lines 6--9 (Filter time-ordered copy)}: Runs the width-9 Hampel filter on the untouched \texttt{block->samples} into the slot's \texttt{filtered[]} array.
+        \item \textbf{Lines 11--17 (Seal \& publish)}: Records block median, outlier count, and both output checksums, then flips \texttt{slot->state} to \texttt{WR2D} right before pulsing the client.
+      \end{itemize}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===========================================================================
+\section{Dataset \& File Format}
+% ===========================================================================
+
+\begin{frame}{Synthetic Battery Telemetry (PyBaMM)}
+  \begin{columns}[t, onlytextwidth]
+    \begin{column}{0.50\textwidth}
+      \smalltext\compactitem
+      Why generate our own battery dataset instead of random numbers?
+      \begin{itemize}
+        \item \textbf{Real electrochemical curve}: Simulated an LG M50 lithium-ion cell (\texttt{Chen2020}) discharging at 0.5C, 1C, and 2C.
+        \item \textbf{4 channels at 100 Hz}: 60\,000 time steps (10 minutes) of Time, Voltage, Current, and Temperature.
+        \item \textbf{Realistic sensor faults}: Added background sensor hiss (AWGN) plus \textbf{1.5\% sharp impulse spikes} ($10$--$40\sigma$), bursts, and dropouts.
+        \item \textbf{Saved the answer key}: Kept the clean curve and exact spike mask offline to score filter accuracy.
+      \end{itemize}
+    \end{column}
+    \begin{column}{0.47\textwidth}
+      \begin{center}
+      \fitwidth{%
+      \begin{tabular}{@{}lr@{}}
+        \toprule
+        \rtmtablehead{Dataset Property} & \rtmtablehead{Value} \\
+        \midrule
+        Discharge runs        & 3 (0.5C, 1C, 2C) \\
+        Moments per run       & 60\,000 (at 100 Hz) \\
+        Channels per moment   & 4 ($t, V, I, T$) \\
+        Total float readings  & 720\,000 \\
+        1C production file    & 960\,000 B (4 blocks) \\
+        Injected spike cells  & 8\,040 (1.489\%) \\
+        \bottomrule
+      \end{tabular}}
+      \end{center}
+      \vskip1mm
+      \begin{highlight}
+        Gives us a repeatable, realistic signal with known medians and known spikes.
+      \end{highlight}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{One-Time Clarification: Planar vs Interleaved Files}
+  \begin{columns}[t, onlytextwidth]
+    \begin{column}{0.48\textwidth}
+      \smalltext\compactitem
+      \begin{tech}
+        \textbf{Planar File (Single-Channel Check)} \\
+        One file per signal (\texttt{r1\_voltage.bin}). 60\,000 voltages in a row (240\,000 B): \\
+        \texttt{[V0, V1, V2...]} (\texttt{stride=1, offset=0}).
+      \end{tech}
+      \vskip1mm
+      \begin{tech}
+        \textbf{Interleaved File (Production Payload)} \\
+        One unified file (\texttt{Chen2020\_c1...bin}). 60\,000 moments $\times$ 4 channels (960\,000 B): \\
+        \texttt{[t0, V0, I0, T0, t1, V1, I1, T1...]} \\
+        (\texttt{stride=4, offset=k}).
+      \end{tech}
+    \end{column}
+    \begin{column}{0.49\textwidth}
+      \smalltext\compactitem
+      \begin{highlight}
+        \textbf{Why This Distinction Matters in Code} \\
+        If you sort an interleaved file directly without picking channel offset $k$, you sort \textbf{seconds against volts against amps against kelvin} — the numbers sort, but the result is meaningless!
+      \end{highlight}
+      \vskip1mm
+      \begin{itemize}
+        \item \texttt{block\_loader\_channel\_offset()} ensures we extract only one physical quantity (Voltage at \texttt{offset = 1}).
+        \item Planar files were used \textbf{only once in tests} to verify that strided extraction produces the exact same 4 checksums.
+        \item \concept{All production runs use the Interleaved file}.
+      \end{itemize}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{Production File Layout: Interleaved Telemetry Record}
+  \begin{columns}[t, onlytextwidth]
+    \begin{column}{0.50\textwidth}
+      \textbf{File}: \texttt{Chen2020\_c1\_T25\_discharge.bin} (960\,000 B)
+      \vskip1.5mm
+      Every 10 ms sample instant is stored as a 16-byte record of 4 floats:
+      \vskip1mm
+      \begin{center}
+      \fitwidth{%
+      \begin{tabular}{@{}ccll@{}}
+        \toprule
+        \rtmtablehead{Offset $k$} & \rtmtablehead{Bytes} & \rtmtablehead{Channel} & \rtmtablehead{Unit} \\
+        \midrule
+        0 & 0--3   & Time & Seconds ($s$) \\
+        1 & 4--7   & \concept{Voltage} & Volts ($V$) \\
+        2 & 8--11  & Current & Amperes ($A$) \\
+        3 & 12--15 & Temperature & Kelvin ($K$) \\
+        \bottomrule
+      \end{tabular}}
+      \end{center}
+      \vskip1.5mm
+      {\footnotesize 60\,000 records $\rightarrow$ \textbf{4 voltage blocks}:
+      3 full crates (16\,384) + 1 short crate (10\,848).}
+    \end{column}
+    \begin{column}{0.47\textwidth}
+      \begin{highlight}
+        \textbf{How \texttt{stride=4, offset=1} Reads Voltage} \\
+        Record $i$ starts at float index $4i$. Adding \texttt{offset = 1} lands directly on \texttt{voltage\_V} at float index $4i + 1$ (bytes $16i + 4$).
+      \end{highlight}
+      \vskip2mm
+      \begin{tech}
+        \textbf{Expected Voltage Block Seals (FNV-1a)}
+        \begin{itemize}
+          \item Block 0 (0..16383): \texttt{0xe90d24d2}
+          \item Block 1 (16384..32767): \texttt{0xc98cd3b2}
+          \item Block 2 (32768..49151): \texttt{0x14c728bb}
+          \item Block 3 (49152..59999): \texttt{0x362ab592}
+        \end{itemize}
+      \end{tech}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===========================================================================
+\section{Dedicated Module Testbenches}
+% ===========================================================================
+
+\begin{frame}{Testbench 1: Virtual Sensor (\texttt{test\_sensor})}
+  \begin{columns}[t, onlytextwidth]
+    \begin{column}{0.48\textwidth}
+      \smalltext\compactitem
+      \begin{highlight}
+        \textbf{1. What it tests} \\
+        Proves \texttt{sensor.c} refills the 4096-record window, extracts channels with \texttt{stride=4}, caps 128-sample frames, computes timestamps, and rejects invalid configs.
+      \end{highlight}
+      \vskip0.5mm
+      \begin{tech}
+        \textbf{2. How it is done}
+        \begin{itemize}
+          \item Passes broken inputs (missing file, 3 B non-float file, zero rate, \texttt{offset >= stride}) to verify rejection.
+          \item Streams 10\,000 samples across multiple window refills against a known ramp $[0, 1, 2 \dots]$.
+          \item Checks strided interleaved reads against expected channel values.
+        \end{itemize}
+      \end{tech}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \smalltext\compactitem
+      \begin{tech}
+        \textbf{3. Output}
+        \begin{itemize}
+          \item Clear diagnostic printed for each bad input (e.g.\ \texttt{not a multiple of 4-byte float}).
+          \item Bit-for-bit match across all window refills, loop wrap-arounds, and timestamps.
+          \item \num{15 tests, 642 checks passed (0 failed, 0 skipped)}.
+        \end{itemize}
+      \end{tech}
+      \vskip1mm
+      \key{Confirms the sensor stream is rock-solid before packing blocks}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{Testbench 2: Protocol Contract (\texttt{test\_protocol})}
+  \begin{columns}[t, onlytextwidth]
+    \begin{column}{0.48\textwidth}
+      \smalltext\compactitem
+      \begin{highlight}
+        \textbf{1. What it tests} \\
+        Proves \texttt{protocol.h} locks down the 64 KiB block size, struct byte layouts, safe QNX message numbers, FNV-1a checksum verification, and the \texttt{/sortmed-results} shared memory layout.
+      \end{highlight}
+      \vskip0.5mm
+      \begin{tech}
+        \textbf{2. How it is done}
+        \begin{itemize}
+          \item Checks \texttt{sizeof(proto\_block\_t) == 65536} and message header sizes (48 B / 8 B).
+          \item Builds a valid \texttt{SUBMIT} message, verifies it passes, then flips \textbf{1 bit} in sample 100 and re-runs \texttt{proto\_submit\_verify()}.
+          \item Checks the 24 B header and 4-slot offsets of the shared results region.
+        \end{itemize}
+      \end{tech}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \smalltext\compactitem
+      \begin{tech}
+        \textbf{3. Output}
+        \begin{itemize}
+          \item 1-bit tampered payload is immediately caught and returns \texttt{PROTO\_ERR\_CHECKSUM (-5)}.
+          \item Bad magic numbers, wrong versions, and out-of-range sample counts return their exact error codes.
+          \item \num{12 tests, 137 checks passed (0 failed, 0 skipped)}.
+        \end{itemize}
+      \end{tech}
+      \vskip1.5mm
+      \key{Guarantees client and server agree on every byte and offset}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{Testbench 3: Block Loader (\texttt{test\_block\_loader})}
+  \begin{columns}[t, onlytextwidth]
+    \begin{column}{0.48\textwidth}
+      \smalltext\compactitem
+      \begin{highlight}
+        \textbf{1. What it tests} \\
+        Proves \texttt{block\_loader.c} gathers 128-sample frames into 16\,384-sample crates, zero-pads the short final crate, maps channel offsets, and stamps valid FNV-1a seals.
+      \end{highlight}
+      \vskip0.5mm
+      \begin{tech}
+        \textbf{2. How it is done}
+        \begin{itemize}
+          \item Feeds a 20\,000-sample ramp and checks that Block 0 gets $16\,384$ samples and Block 1 gets $3\,616$ samples plus $12\,768$ zeros.
+          \item Loads the 60\,000-record interleaved battery file with \texttt{VOLTAGE} selected and verifies all 4 blocks via \texttt{proto\_submit\_verify()}.
+        \end{itemize}
+      \end{tech}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \smalltext\compactitem
+      \begin{tech}
+        \textbf{3. Output}
+        \begin{itemize}
+          \item Every sample across all blocks matches the source recording bit-for-bit, with zeroed tail slots confirmed.
+          \item Produces the 4 expected voltage block seals (\texttt{0xe90d24d2}, \texttt{0xc98cd3b2}, \texttt{0x14c728bb}, \texttt{0x362ab592}).
+          \item \num{8 tests, 116 checks passed (0 failed, 0 skipped)}.
+        \end{itemize}
+      \end{tech}
+      \vskip1.5mm
+      \key{Guarantees every 64 KiB crate arriving at the server is valid}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{Testbench 4: Parallel Merge Sort (\texttt{test\_mergesort})}
+  \begin{columns}[t, onlytextwidth]
+    \begin{column}{0.48\textwidth}
+      \smalltext\compactitem
+      \begin{highlight}
+        \textbf{1. What it tests} \\
+        Proves \texttt{mergesort.c} sorts accurately across multiple worker threads, synchronizes phases cleanly without race conditions, and gives identical output regardless of thread count.
+      \end{highlight}
+      \vskip0.5mm
+      \begin{tech}
+        \textbf{2. How it is done}
+        \begin{itemize}
+          \item Compares sorted output against standard C \texttt{qsort} on random arrays, reverse-sorted arrays, all-equal arrays, and $\pm 0.0$ / denormal floats.
+          \item Sorts the same 16\,384-sample block with \textbf{1, 2, 4, and 8 threads} and compares every output byte.
+          \item Sorts 100 blocks back-to-back on the same pool to stress-test barrier reuse.
+        \end{itemize}
+      \end{tech}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \smalltext\compactitem
+      \begin{tech}
+        \textbf{3. Output}
+        \begin{itemize}
+          \item 100\% bit-identical sorted arrays across 1, 2, 4, and 8 worker threads.
+          \item Phase plan verified on 16\,384 samples with 4 threads: \textbf{4 partitions, 2 merge phases, 7 tasks}.
+          \item \num{13 tests, 578 checks passed (0 failed, 0 skipped)}.
+        \end{itemize}
+      \end{tech}
+      \vskip1.5mm
+      \key{Guarantees fast multi-core sorting with zero thread bugs}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{Testbench 5: Rolling Median \& Shared Memory (\texttt{test\_median})}
+  \begin{columns}[t, onlytextwidth]
+    \begin{column}{0.48\textwidth}
+      \smalltext\compactitem
+      \begin{highlight}
+        \textbf{1. What it tests} \\
+        Proves \texttt{median.c} strips impulse spikes without altering clean curves, matches reference output across block seams, and checks shared-memory bounds.
+      \end{highlight}
+      \vskip0.5mm
+      \begin{tech}
+        \textbf{2. How it is done}
+        \begin{itemize}
+          \item Compares \texttt{median\_filter\_block()} bit-for-bit against a brute-force \texttt{qsort} reference across widths $3..31$.
+          \item Filters 5000 samples across block seams with neighbour context to verify it matches whole-signal filtering.
+          \item Tests \texttt{shm\_range\_valid()} against out-of-bounds offsets and \texttt{UINT64\_MAX} overflow traps.
+        \end{itemize}
+      \end{tech}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \smalltext\compactitem
+      \begin{tech}
+        \textbf{3. Output}
+        \begin{itemize}
+          \item Clean signals remain untouched; injected spikes drop RMS error back to the $1\sigma$ noise floor.
+          \item Block-by-block filtering with neighbour context is bit-identical to full-signal filtering.
+          \item \num{12 median tests (7551 checks) + 13 shm checks passed (0 failed)}.
+        \end{itemize}
+      \end{tech}
+      \vskip1mm
+      \key{Confirms spike removal and safe shared-memory offset math}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===========================================================================
+\section{Two-Fold Verification \& Results}
+% ===========================================================================
+
+\begin{frame}{Why We Tested in a Two-Fold Manner}
+  \smalltext\compactitem
+  We verified every module in two stages so logic bugs and hardware timing are tested separately:
+  \begin{columns}[t, onlytextwidth]
+    \begin{column}{0.48\textwidth}
+      \begin{highlight}
+        \textbf{Fold 1: Host PC Verification (Logic First)}
+      \end{highlight}
+      \begin{itemize}
+        \item Compiled with \texttt{gcc -pthread} on the PC before touching hardware.
+        \item Catches window boundary bugs, 1-bit checksum errors, block-seam filter bugs, integer overflows, and thread races right away.
+        \item Runs all 6 testbenches (\texttt{test\_sensor}, \texttt{test\_protocol}, \texttt{test\_block\_loader}, \texttt{test\_mergesort}, \texttt{test\_median}, \texttt{test\_shared\_memory}).
+      \end{itemize}
+      \num{61 tests, 9037 checks — 0 failed, 0 skipped}.
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \begin{tech}
+        \textbf{Fold 2: On-Target Raspberry Pi 4 (QNX 8.0)}
+      \end{tech}
+      \begin{itemize}
+        \item Cross-compiled for ARM64 (\texttt{qcc -Vgcc\_ntoaarch64le}) and packed into the QNX boot image (\texttt{ifs-rpi4.bin}).
+        \item Runs the testbenches, \texttt{sortmed-server}, and \texttt{sortmed-client} on the 4 physical Cortex-A72 cores over UART serial.
+        \item Proves real QNX message passing, pulse delivery, shared memory, and multi-core speedup on the board.
+      \end{itemize}
+      \num{100\% pass rate across all target tests and hardware demos}.
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{Target Testbench Setup}
+  \begin{columns}[c, onlytextwidth]
+    \begin{column}{0.44\textwidth}
+      \begin{tech}
+        \textbf{Hardware Target} \\
+        Raspberry Pi 4 Model B with 4 Cortex-A72 cores running QNX 8.0.0. Booted directly from SD card into RAM IFS image.
+      \end{tech}
+      \vskip2mm
+      \begin{tech}
+        \textbf{Zero Network Dependency} \\
+        Controlled strictly via FTDI USB-to-serial adapter on GPIO 14/15 (\texttt{/dev/ser1}) at 115200 8N1. Self-contained and noise-free.
+      \end{tech}
+    \end{column}
+    \begin{column}{0.54\textwidth}
+      \begin{center}
+        \includegraphics[height=0.58\textheight, keepaspectratio]{assets/board-wiring}
+      \end{center}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{Console: Board Boot and Initialization}
+  \columnsimage{boot}{0.5}{Raspberry Pi 4 boot sequence under QNX 8.0.0. All four Cortex-A72 cores are brought online by \texttt{procnto-smp-instr}. System shell initializes on serial console.}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{Console: Protocol Layer Verification}
+  \columnsimage{protocol}{0.5}{\texttt{test\_protocol} executing on target. Pins the exact 64 KiB block size, application message ID ranges, pulse codes, FNV-1a checksum, and the shared results region.}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{Console: Virtual Sensor Verification}
+  \columnsimage{sensor}{0.5}{\texttt{test\_sensor /data}: 642 checks passed. Console verifies robust error trapping: explicitly naming and rejecting invalid strides, bad offsets, and unaligned files.}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{Console: Block Loader Verification}
+  \columnsimage{loader}{0.5}{\texttt{test\_block\_loader /data}: 116 checks passed. Confirms strided record extraction produces deterministic 64 KiB blocks and detects bit corruption.}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{Console: On-Board Payload Verification}
+  \columnsimage{cksum}{0.5}{Direct \texttt{cksum} comparison of embedded IFS files, followed by \texttt{loader\_demo} reading the interleaved file. Checksums match host dataset; blocks 0--3 accepted.}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{Console: Live Sensor Streaming Demo}
+  \columnsimage{sensor-demo}{0.5}{\texttt{sensor\_demo} streaming at 10 Hz with hardware monotonic pacing. Reads sample-by-sample, aggregating 60\,000 readings into 4 structured blocks.}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{Console: Parallel Sorting Verification}
+  \columnsimage{mergesort}{0.5}{\texttt{test\_mergesort}: 578 checks passed. Tests edge boundaries (0 to 64 samples), duplicate values, reverse sequences, and thread invariance.}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{Console: Real-Time Multi-Core Execution}
+  \columnsimage{pipeline4}{0.5}{\texttt{pipeline\_demo} on real voltage telemetry with 4 workers. Phase plan dynamically reflects load: \textbf{4 partitions, 2 merge phases, 7 tasks}.}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{Console: Core Scaling Sweep}
+  \columnsimage{sweep}{0.5}{Worker sweep (1, 2, 4 threads) sorting 64 KiB blocks. Execution time drops from 2.278 ms $\rightarrow$ 1.253 ms $\rightarrow$ 0.757 ms. Medians and ranges remain perfectly identical.}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{Benchmark Analysis and Throughput}
+  \begin{columns}[t, onlytextwidth]
+    \begin{column}{0.50\textwidth}
+      \begin{table}
+        \centering
+        \fitwidth{%
+        \begin{tabular}{@{}rrrr@{}}
+          \toprule
+          \rtmtablehead{Workers} & \rtmtablehead{Time/Block} & \rtmtablehead{Throughput} & \rtmtablehead{Speed-up} \\
+          \midrule
+          1 & 2.278 ms & 25.12 MiB/s & 1.00$\times$ \\
+          2 & 1.253 ms & 45.66 MiB/s & 1.82$\times$ \\
+          4 & \num{0.757 ms} & \num{75.55 MiB/s} & \num{3.01$\times$} \\
+          \bottomrule
+        \end{tabular}}
+      \end{table}
+      \vskip1mm
+      {\scriptsize Measured on physical Raspberry Pi 4 running QNX 8.0.0 SMP.}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \begin{highlight}
+        \textbf{Massive Real-Time Headroom} \\
+        One 64 KiB block represents \textbf{163.84 seconds} of 100 Hz sensor telemetry. Sorting completes in \textbf{0.757 ms} — over \num{216\,000$\times$} real-time speed.
+      \end{highlight}
+      \vskip1.5mm
+      \smalltext\compactitem
+      \begin{itemize}
+        \item Clean multi-core scaling ($3.01\times$ speedup on 4 physical Cortex-A72 cores).
+        \item Exact same medians ($3.9618\text{ V}$, $3.6416\text{ V}$, $3.3841\text{ V}$, $2.9735\text{ V}$) across 1, 2, and 4 workers.
+      \end{itemize}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{End-to-End QNX Service Execution on Raspberry Pi 4}
+  \begin{columns}[t, onlytextwidth]
+    \begin{column}{0.53\textwidth}
+      {\footnotesize \texttt{sortmed-server} \& \texttt{sortmed-client} on \texttt{Chen2020\_c1\_T25\_discharge.bin}:}
+      \vskip1mm
+      \begin{center}
+      \fitwidth{%
+      \begin{tabular}{@{}rrrrr@{}}
+        \toprule
+        \rtmtablehead{Block} & \rtmtablehead{Samples} & \rtmtablehead{Median (V)} & \rtmtablehead{Spikes} & \rtmtablehead{Server Time} \\
+        \midrule
+        0 (Job 1) & 16\,384 & 3.961808 & 431 & 7.51 ms \\
+        1 (Job 2) & 16\,384 & 3.641635 & 382 & 7.32 ms \\
+        2 (Job 3) & 16\,384 & 3.384104 & 406 & 7.30 ms \\
+        3 (Job 4) & 10\,848 & 2.973536 & 283 & 5.01 ms \\
+        \midrule
+        \textbf{Global} & \textbf{60\,000} & \num{3.566194} & \num{1\,502} & \textbf{27.14 ms} \\
+        \bottomrule
+      \end{tabular}}
+      \end{center}
+      \vskip1mm
+      {\scriptsize Time breakdown per 64 KiB block: \textbf{0.757 ms} 4-worker merge sort + \textbf{$\sim$6.5 ms} width-9 Hampel filter \& FNV-1a checksums.}
+    \end{column}
+    \begin{column}{0.44\textwidth}
+      \smalltext\compactitem
+      \begin{highlight}
+        \textbf{Round-Trip Bit-Exact Proof} \\
+        \texttt{cksum raw.bin} matches the single-channel reference file (\texttt{2261229843}, 240\,000 B), proving strided extraction and IPC reassembly lost zero bits.
+      \end{highlight}
+      \vskip0.5mm
+      \begin{tech}
+        \textbf{Persisting Outputs on QNX} \\
+        Since \texttt{/tmp} is RAM (\texttt{/dev/shmem}), the SD card FAT partition (\texttt{/dev/sd0t1}) is mounted at \texttt{/var/mnt} to save \texttt{raw.bin}, \texttt{sorted.bin}, \texttt{filtered.bin}, and \texttt{medians.csv}.
+      \end{tech}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{Hardware Output: Noisy vs Hampel-Filtered Telemetry}
+  \begin{columns}[c, onlytextwidth]
+    \begin{column}{0.49\textwidth}
+      \begin{center}
+        \includegraphics[width=\linewidth, height=0.58\textheight, keepaspectratio]{assets/run_cleaned_vs_noisy}
+      \end{center}
+    \end{column}
+    \begin{column}{0.49\textwidth}
+      \begin{center}
+        \includegraphics[width=\linewidth, height=0.58\textheight, keepaspectratio]{assets/run_zoom}
+      \end{center}
+    \end{column}
+  \end{columns}
+  \vskip1mm
+  {\scriptsize \textbf{Left}: Full 60\,000-sample discharge curve (\texttt{raw.bin} vs \texttt{filtered.bin}) across the 4 block boundaries. \textbf{Right}: 2\,000-sample zoom showing how the width-9 Hampel filter strips all \textbf{1\,502 impulse spikes} while leaving the true discharge curve untouched.}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{Hardware Output: Sorted Distribution \& Per-Block Summary}
+  \begin{columns}[c, onlytextwidth]
+    \begin{column}{0.62\textwidth}
+      \begin{center}
+        \includegraphics[width=\linewidth, height=0.68\textheight, keepaspectratio]{assets/run_summary}
+      \end{center}
+    \end{column}
+    \begin{column}{0.35\textwidth}
+      \smalltext\compactitem
+      \begin{highlight}
+        \textbf{Global Sorted Curve} \\
+        \texttt{sorted.bin} holds all 60\,000 samples in monotonically increasing order with global median \textbf{3.5662 V}.
+      \end{highlight}
+      \vskip1mm
+      \begin{tech}
+        \textbf{Per-Block Summary (\texttt{medians.csv})} \\
+        Tracks the voltage drop across blocks ($3.962\text{ V} \rightarrow 2.974\text{ V}$) and logs the exact outlier count removed per block ($431, 382, 406, 283$).
+      \end{tech}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ===========================================================================
+\section{Applications \& Conclusion}
+% ===========================================================================
+
+\begin{frame}{Practical Industrial Applications}
+  \begin{columns}[t, onlytextwidth]
+    \begin{column}{0.48\textwidth}
+      \smalltext\compactitem
+      \begin{itemize}
+        \item \concept{Battery Management Systems (BMS)}: Electric vehicle battery packs suffer sharp switching spikes during inverter transients. Rolling median filtering strips the spikes while parallel sorting tracks cell voltage distributions.
+        \item \concept{Industrial Edge Gateways}: Factory controllers gather high-rate vibration and temperature feeds; handing 64 KiB blocks to worker threads keeps sensor polling loops from stalling.
+      \end{itemize}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \smalltext\compactitem
+      \begin{itemize}
+        \item \concept{Automotive Sensor Fusion (ADAS)}: Radar and wheel-speed streams need deterministic, spike-free filtering and fast percentile calculation on QNX safety controllers.
+        \item \concept{Flight \& Railway Recorders}: Summarizing continuous multi-channel telemetry into checksum-verified statistical blocks.
+      \end{itemize}
+      \vskip1.5mm
+      \begin{highlight}
+        Fits any embedded QNX system that needs spike removal and fast multi-core percentiles without blocking sensor reads.
+      \end{highlight}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{Summary and Project Status}
+  \begin{columns}[t, onlytextwidth]
+    \begin{column}{0.48\textwidth}
+      \smalltext\compactitem
+      \begin{itemize}
+        \item \textbf{Input Pipeline}: 64 KiB block contract (\texttt{protocol.h}), sliding-window virtual sensor (\texttt{sensor.c}), strided block loader (\texttt{block\_loader.c}), and PyBaMM interleaved dataset.
+        \item \textbf{Parallel Sort \& Rolling Filter}: Multi-threaded merge sort (\texttt{mergesort.c}) with POSIX phase barriers + Hampel rolling median filter (\texttt{median.c}).
+        \item \textbf{QNX Client--Server Service}: \texttt{MsgSendv}/\texttt{MsgReceivev} 64 KiB transfer, \texttt{/sortmed-results} shared memory (\texttt{shm\_region.c}), and pulse code 16 notification (\texttt{server.c}, \texttt{client.c}).
+      \end{itemize}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      \smalltext\compactitem
+      \begin{itemize}
+        \item \textbf{Two-Fold Verification}: 61 host tests (\textbf{9037 checks}, 0 failures) + full end-to-end QNX Raspberry Pi 4 verification.
+        \item \textbf{Target Performance}: \textbf{0.757 ms} sort time ($3.01\times$ speedup) and \textbf{$\sim$7.3 ms} total server time per 64 KiB block across 4 Cortex-A72 cores.
+        \item \textbf{Verified Outputs}: Strips \textbf{1\,502 spikes} across 60\,000 samples and persists bit-exact \texttt{raw.bin}, \texttt{sorted.bin}, \texttt{filtered.bin}, and \texttt{medians.csv}.
+      \end{itemize}
+      \vskip1.5mm
+      \begin{center}
+        {\color{rtmPrimary}\large\bfseries Questions and Discussion}
+      \end{center}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\closingSlide
+
+\end{document}
