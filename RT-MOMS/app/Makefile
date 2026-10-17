@@ -20,10 +20,12 @@ INSTALL_DATA = ../install/data
 DATA         = ../../data/artifacts/dataset
 SRCDIR       = ../tests
 
-SOURCES  = sensor.c protocol.c block_loader.c mergesort.c
-HEADERS  = sensor.h protocol.h block_loader.h mergesort.h
-PROGRAMS = test_protocol test_sensor test_block_loader test_mergesort \
-           sensor_demo loader_demo pipeline_demo
+SOURCES  = sensor.c protocol.c block_loader.c mergesort.c median.c shared_memory.c
+HEADERS  = sensor.h protocol.h block_loader.h mergesort.h median.h shared_memory.h
+TEST_PROGRAMS = test_protocol test_sensor test_block_loader test_mergesort \
+                sensor_demo loader_demo pipeline_demo
+SERVICE_PROGRAMS = sortmed-server sortmed-client
+PROGRAMS = $(TEST_PROGRAMS) $(SERVICE_PROGRAMS)
 
 # mergesort.c uses POSIX threads, which the QNX C library provides without an
 # extra library or flag; the host build needs the compiler split described in
@@ -40,8 +42,16 @@ PAYLOAD = $(DATA)/bin/channels/r1_voltage.bin \
 
 all: $(PROGRAMS)
 
-$(PROGRAMS): %: $(SRCDIR)/%.c $(SOURCES) $(HEADERS)
+$(TEST_PROGRAMS): %: $(SRCDIR)/%.c $(SOURCES) $(HEADERS)
 	$(QCC) $(QCFLAGS) -o $@ $< $(SOURCES)
+
+sortmed-server: server.c protocol.c mergesort.c median.c shm_region.c \
+                protocol.h mergesort.h median.h shm_region.h
+	$(QCC) $(QCFLAGS) -o $@ server.c protocol.c mergesort.c median.c shm_region.c
+
+sortmed-client: client.c sensor.c protocol.c block_loader.c mergesort.c median.c shm_region.c \
+                protocol.h sensor.h block_loader.h mergesort.h median.h shm_region.h
+	$(QCC) $(QCFLAGS) -o $@ client.c sensor.c protocol.c block_loader.c mergesort.c median.c shm_region.c
 
 install: all
 	mkdir -p $(INSTALL_BIN)
