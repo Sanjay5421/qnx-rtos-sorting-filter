@@ -475,7 +475,7 @@ flowchart LR
 - `images/rpi4.build` places the programs in `/bin` and the payload in `/data`
   (those entries are optional, so a checkout without the generated data still
   builds an image — it just reports the payload tests as skipped).
-- The image currently carries seven programs and is 37 610 936 B with the sort in
+- The image currently carries seven programs and is 37 742 192 B with the sort in
   it; `dumpifs images/ifs-rpi4.bin` lists them back out, which is the check that
   they are really inside.
 - The console is the interface: `/dev/ser1` at 115200 8N1, a `ksh` prompt, and
@@ -517,7 +517,7 @@ flowchart LR
 | Thread scaling on the Pi 4 | 2.278 ms → 1.253 ms → 0.757 ms per block at 1, 2, 4 workers: 3.01× |
 | Real-time headroom at 100 Hz | one 64 KiB block is 163.84 s of signal, sorted in 0.757 ms |
 | Cross-compile | 7/7 binaries, ELF64 AArch64, no warnings |
-| Boot image carrying the programs | 37 610 936 B, SHA-256 `b71677d5…4b54d2` |
+| Boot image carrying the programs | 37 742 192 B, SHA-256 `57637557…4588c49` |
 
 ---
 

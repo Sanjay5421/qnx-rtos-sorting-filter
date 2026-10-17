@@ -76,6 +76,30 @@ visibly different.
   full-length result fitting in the last slot. The host suite is 1473 checks, all
   passing, and the header still cross-compiles for `aarch64le` with no warnings.
 
+### Fixed
+
+- **The server resolved the client's connection once and then reused it.** Each
+  run of `sortmed-client` registers the same name afresh, so from the second run
+  on the completion pulse went to a dead connection and the client waited for an
+  event that could not arrive. The server now opens the client's name for every
+  job and closes it after the pulse — which is what makes four consecutive runs,
+  one channel each, possible without restarting the service. The tidier shape is
+  for the client to pass its own coid in the submit message; that header is
+  frozen at milestone 1, so the server resolves the name per job instead.
+- **The boot image carries that fix.** `RT-MOMS/images/ifs-rpi4.bin` is
+  37 742 192 B, SHA-256
+  `57637557e9a8565974714802f412f074767bc1d3d5fab1c2779437d045588c49` — the same
+  size as the previous one, so the hash is what tells them apart. The
+  `sortmed-server` and `sortmed-client` extracted from it match the freshly built
+  `install/aarch64le/bin` binaries byte for byte up to mkifs's page rounding,
+  while the one in the previous image does not.
+- **The comparison tooling uses the service's own median definition**
+  (`median_of_sorted`: the mean of the two middle values for an even-sized
+  block) and reports the recording's real time base — 60 000 samples over
+  4489.8 s, 13.36 Hz — instead of the client's nominal rate flag. Re-deriving the
+  board's `medians.csv` from the dataset now reproduces it exactly:
+  3.961808 / 3.641635 / 3.384104 / 2.973536 V.
+
 ## [Unreleased] — 2026-10-15
 
 The QNX side of the project (`RT-MOMS/`) landed in this window without an entry

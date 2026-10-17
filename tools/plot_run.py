@@ -6,7 +6,8 @@ Usage:
 
 RUN_DIR holds the files the client wrote on the board:
 
-    raw.bin       float32, the channel as received (100 Hz in this dataset)
+    raw.bin       float32, the channel as received (the rate flag is nominal;
+                  this dataset's time column advances ~74.8 ms per sample)
     filtered.bin  float32, outliers replaced by the rolling median
     sorted.bin    float32, the same samples ascending       (optional)
     medians.csv   block_index,samples,median,outliers_removed (optional)
@@ -129,7 +130,8 @@ def main(argv: list[str]) -> int:
     print(f"samples    : {n}  ({n / RATE_HZ:.1f} s at {RATE_HZ:.0f} Hz)")
     print(f"differing  : {int(changed.sum())} (raw != filtered)")
     if sorted_values is not None:
-        print(f"sorted.bin : {sorted_values.size} samples, median {sorted_values[n // 2]:.9g}, "
+        print(f"sorted.bin : {sorted_values.size} samples, "
+              f"median {float(np.median(sorted_values)):.9g}, "
               f"non-decreasing {nondecreasing}, same values {same_values}")
     for row in medians:
         print(f"  block {row['block_index']}: {row['samples']} samples, "
@@ -191,7 +193,7 @@ def main(argv: list[str]) -> int:
 
         ax2.plot(np.arange(n), sorted_values, color=FILTER, linewidth=1.6)
         for value, label, colour in ((sorted_values[0], "min", NOISY),
-                                     (sorted_values[n // 2], "median", MEDIAN),
+                                     (float(np.median(sorted_values)), "median", MEDIAN),
                                      (sorted_values[-1], "max", NOISY)):
             ax2.axhline(value, color=colour, linestyle="--", linewidth=1.2, alpha=0.9)
             ax2.annotate(f"{label} {value:.5g}", xy=(0.015, value), xycoords=("axes fraction", "data"),

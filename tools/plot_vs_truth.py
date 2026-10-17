@@ -122,11 +122,13 @@ def busiest(flags: np.ndarray, width: int, count: int) -> list[int]:
 
 
 def block_medians(x: np.ndarray) -> list[float]:
-    """The service's definition: element n/2 of each sorted block."""
+    """The service's definition (median_of_sorted): the middle element for an
+    odd count, the mean of the two middle elements for an even one. Every block
+    here has an even count, so it is the mean - np.median does the same."""
     out, at = [], 0
     for size in BLOCKS:
         chunk = np.sort(x[at:at + size])
-        out.append(float(chunk[chunk.size // 2]))
+        out.append(float(np.median(chunk)))
         at += size
     return out
 
@@ -164,9 +166,13 @@ def main(argv: list[str]) -> int:
     gain = r_raw / r_flt
     noise = float(np.median(err_raw))
 
+    times = npz["clean"][run, :, 0].astype(np.float64)
+    span = float(times[-1] - times[0])
     print(f"directory : {run_dir}")
     print(f"matched   : run '{run_id}', channel {channel} ({NPZ_CHANNELS[channel]})")
-    print(f"samples   : {n}  ({n / RATE_HZ:.1f} s at {RATE_HZ:.0f} Hz)")
+    print(f"samples   : {n} over {span:.1f} s of recording (mean {n / span:.2f} Hz; "
+          f"{RATE_HZ:.0f} Hz is only the client's nominal flag)")
+    print(f"step      : {span / (n - 1) * 1e3:.2f} ms per sample (simulator output points)")
     print(f"noise     : median |received - clean| = {noise:.6f} V, "
           f"largest excursion {err_raw.max():.3f} V")
     print(f"received  : RMSE {r_raw:.6f}  MAE {mae_raw:.6f}  p99 {p99_raw:.6f}")
@@ -268,13 +274,14 @@ def main(argv: list[str]) -> int:
 
     # --- 4. every column of the recording ------------------------------------
     fig, axes = plt.subplots(2, 2, figsize=(14, 8.4), dpi=DPI)
-    print("\nblock medians per column (the service's definition: element n/2 of a sorted block)")
+    print("\nblock medians per column (the service's median_of_sorted: the mean of the")
+    print("two middle values, every block here being even-sized)")
     print(f"{'column':12s} {'unit':5s} " + " ".join(f"{'block ' + str(i):>14s}" for i in range(4))
           + f" {'global':>14s}")
     for ax, column in zip(axes.ravel(), range(npz["noisy"].shape[2])):
         series = npz["noisy"][run, :, column].astype(np.float64)
         meds = block_medians(series)
-        glob = float(np.sort(series[:sum(BLOCKS)])[sum(BLOCKS) // 2])
+        glob = float(np.median(series[:sum(BLOCKS)]))
         bars = ax.bar([f"block {i}\n{size} samples" for i, size in enumerate(BLOCKS)],
                       meds, color=FILTER, width=0.6, alpha=0.85)
         for bar, value in zip(bars, meds):

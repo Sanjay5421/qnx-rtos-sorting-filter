@@ -207,7 +207,7 @@ programs talking to each other — has its own run sheet in
 
 | File | Notes |
 | --- | --- |
-| `ifs-rpi4.bin` | **37 610 936 B**, SHA-256 `b71677d514c186e2fa055def8c8e227280d45b7e3aa994f6f1c5239c6f4b54d2`. The stock image is 34 489 984 B and contains none of the programs below. |
+| `ifs-rpi4.bin` | **37 742 192 B**, SHA-256 `57637557e9a8565974714802f412f074767bc1d3d5fab1c2779437d045588c49`. The stock image is 34 489 984 B and contains none of the programs below. |
 | `config.txt` | the BSP guide's `[rpi4]` block; `kernel=ifs-rpi4.bin` is what boots this image |
 | firmware | `start4.elf`, `fixup4.dat`, `bcm2711-rpi-4-b.dtb`, `overlays/` |
 
@@ -344,7 +344,7 @@ missing output rather than a failure: everything up to the cut matched the host.
 ### If a command is not found
 
 Then the image on the card is not the one from section 9 — check the
-37 610 936-byte size first, before looking at anything else.
+37 742 192-byte size first, before looking at anything else.
 
 ---
 
@@ -356,7 +356,8 @@ repository stayed clean:
 | Step | How | Result |
 | --- | --- | --- |
 | Compile the BSP sources | `make` | exit 0, 83 s |
-| Build the image | `make images` | exit 0, 7 s, `ifs-rpi4.bin` = 36 197 292 B |
+| Build the image | `make images` | exit 0, 7 s, `ifs-rpi4.bin` = 36 197 292 B (BSP only) |
+| Build the image with the programs | `make` in `RT-MOMS/` | exit 0, 27 s incremental, `ifs-rpi4.bin` = 37 742 192 B |
 
 ```bat
 cd RT-MOMS
@@ -372,14 +373,15 @@ the build file to force a rebuild.
 Two things to know before running it inside the repository:
 
 - It writes hundreds of files into `RT-MOMS/install/` and object files
-  throughout `RT-MOMS/src/`, and it **overwrites the committed**
-  `RT-MOMS/images/ifs-rpi4.bin`. Restore that with
-  `git checkout -- RT-MOMS/images/ifs-rpi4.bin`, and consider ignoring
-  `RT-MOMS/install/`.
-- The image it produces is *not* byte-identical to the shipped one
-  (36 197 292 B against 34 489 984 B): it resolves its components from this SDP
-  installation rather than from the environment QNX built the shipped image in.
-  Both boot the same way.
+  throughout `RT-MOMS/src/` — both are ignored — and it **rewrites**
+  `RT-MOMS/images/ifs-rpi4.bin`. The committed copy is the build recorded above,
+  so after rebuilding changed sources commit the new image, or
+  `git checkout -- RT-MOMS/images/ifs-rpi4.bin` to drop it.
+- A rebuild is *not* byte-identical to the committed image even when nothing
+  changed — the same 37 742 192 B size, different bytes — because it resolves its
+  components from this SDP installation rather than from the environment the
+  committed one was built in. Both boot the same way, so check the programs with
+  `dumpifs`, not the size.
 
 `Templates_build_sdp800/template.mk` turns out not to be needed — the `-include`
 is optional, so `$(MKIFSFLAGS)` simply expands to nothing.
@@ -397,9 +399,9 @@ payload in `/data`. One `make` therefore produces an image that contains them:
 | `/data/bin/channels/r1_voltage.bin` | 240 000 B |
 | `/data/bin/Chen2020_c1_T25_discharge.bin` | 960 000 B |
 
-The image grew from 36 197 292 B (the BSP alone) to 37 610 936 B; the sort and
-its two binaries account for 86 148 B of that. `dumpifs images/ifs-rpi4.bin`
-lists them back out of the built image, which is the check that they really are
+The image grew from 36 197 292 B (the BSP alone) to 37 742 192 B once the
+programs above and the payload were added. `dumpifs images/ifs-rpi4.bin` lists
+them back out of the built image, which is the check that they really are
 inside it. Copy it to the SD card's FAT partition with the firmware files and a
 `config.txt` containing `kernel=ifs-rpi4.bin`.
 

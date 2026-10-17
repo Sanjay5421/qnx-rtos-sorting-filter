@@ -41,7 +41,7 @@ sha256sum ifs-rpi4.bin
 | --- | --- |
 | Path | `RT-MOMS/images/ifs-rpi4.bin` |
 | Size | 37 742 192 B |
-| SHA-256 | `32c303e8249164fbc69c076a6f3dca28fb0fd14fc79b5f3e97e7cfb2f36d2e83` |
+| SHA-256 | `57637557e9a8565974714802f412f074767bc1d3d5fab1c2779437d045588c49` |
 
 Copy it to the SD card's FAT partition beside `config.txt` (`kernel=ifs-rpi4.bin`)
 and the firmware files (`start4.elf`, `fixup4.dat`, `bcm2711-rpi-4-b.dtb`,
