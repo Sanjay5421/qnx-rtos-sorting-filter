@@ -48,6 +48,8 @@ data/artifacts/dataset/
 /RT-MOMS/app/test_sensor
 /RT-MOMS/app/test_block_loader
 /RT-MOMS/app/test_mergesort
+/RT-MOMS/app/test_median
+/RT-MOMS/app/test_shared_memory
 /RT-MOMS/app/sensor_demo
 /RT-MOMS/app/loader_demo
 /RT-MOMS/app/pipeline_demo
