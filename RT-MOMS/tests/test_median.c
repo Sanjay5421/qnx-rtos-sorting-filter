@@ -440,10 +440,10 @@ static void test_spikes_removed_in_noise(void)
     T_CHECK_INT(median_filter_signal(&cfg, noisy, SIGNAL_LEN, clean,
                                      &count), 0);
 
-    /* Injected spikes (10-40 sigma) are removed. Recall is statistical: over
-     * 100 seeds the default misses 0.28 % of spikes (a 10 sigma spike whose
-     * window MAD came out large), so allow one miss here rather than tune the
-     * expectation to one random sequence. */
+    /* Injected spikes (10-40 sigma) are removed. Catching a spike is
+     * statistical: over 100 seeds the default misses 0.28 % of spikes (a 10
+     * sigma spike whose window MAD came out large), so allow one miss here
+     * rather than tune the expectation to one random sequence. */
     for (i = 67; i < SIGNAL_LEN; i += 67) {
         if (fabsf(clean[i] - truth[i]) >= 6.0f * sigma) {
             missed++;

@@ -55,7 +55,7 @@
  * spikes: threshold 4 misses 0.28 % of spikes and flags 0.9 % of clean samples,
  * threshold 5 misses 0.91 % and flags 0.4 %. A missed spike is the failure the
  * filter exists to prevent; a false alarm swaps a sample for its neighbourhood
- * median and barely moves the error, so recall wins. */
+ * median and barely moves the error, so err on the side of catching it. */
 #define MEDIAN_DEFAULT_THRESHOLD 4.0f
 
 /* Samples of context a block needs on each side. */

@@ -888,7 +888,7 @@ have, and the merge-sort testbench slide says the invariance test covers
 | Time per parcel on the board | 0.757 ms (one worker: 2.278 ms, so 3.01×) |
 | Speed versus the data | 163.84 s of signal sorted in 0.757 ms ≈ 200 000× real time |
 | Tests | 48 tests, 1473 checks on the host; the sort's 578 also pass on the board |
-| Boot image | 37 610 936 B — seven programs and the data inside one file |
+| Boot image | 37 742 192 B — seven programs and the data inside one file |
 
 ---
 
