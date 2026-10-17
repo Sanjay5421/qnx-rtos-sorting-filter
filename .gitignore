@@ -60,3 +60,8 @@ data/artifacts/dataset/
 # Figures produced from a board run by tools/plot_run.py — regenerable from the
 # run's output files, so they are not part of the deliverable.
 /run-figures/
+
+# A board run's own output files, copied into tools/ for plotting
+/tools/*.bin
+/tools/medians.csv
+/tools/*.png
