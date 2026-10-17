@@ -498,6 +498,385 @@ flowchart LR
 
 ---
 
+## Testing, in one place — what we test, how, and how to read it
+
+### The machinery
+
+There is no test framework. Each file in `RT-MOMS/tests/` is a normal C program
+that includes `test_util.h` and calls check macros; `make check` builds all four
+and runs them one after another, printing a summary per binary.
+
+```c
+/* test_util.h — one check, counted; a failure prints file and line */
+#define T_CHECK(cond)                                            \
+    do { t_checks++;                                             \
+         if (!(cond)) { t_failed++;                              \
+             printf("    FAIL %s:%d: %s\n", __FILE__, __LINE__, #cond); } } while (0)
+
+#define T_RUN(fn)  /* prints the test name, then "ok" or "FAILED" */
+static int t_summary(void) {
+    printf("\n  %d checks, %d failed, %d skipped\n", ...);
+    return (t_failed == 0) ? 0 : 1;      /* the exit status is the verdict */
+}
+```
+
+- **`T_CHECK` / `T_CHECK_INT` / `T_CHECK_SIZE` / `T_CHECK_SAME_FLOAT`** are the
+  vocabulary: `T_CHECK_SAME_FLOAT` compares the *bits*, so `+0.0` and `-0.0` are
+  not "equal", `T_CHECK_INT` prints both numbers on failure, and so on.
+- **`T_RUN(test_x)`** runs one test and prints its name: a line reading `ok`
+  means every check inside it passed.
+- **The last line is the verdict**: `1473 checks, 0 failed, 0 skipped`. The
+  process exit status is 0 only if nothing failed, so `make check` stops on a
+  failure.
+- **`skipped`** is not a failure: the payload tests need the generated dataset.
+  Run without it (or on the target without the directory argument) and the
+  summary says `1 skipped` while still exiting 0. **`0 skipped` therefore means
+  the test really ran against the real recording** — that is the number to quote.
+- **The same sources run on both machines**: the host compiles them with
+  `gcc`/`clang`, the board with `qcc -Vgcc_ntoaarch64le`. Identical source,
+  identical checks, identical summaries — which is what makes the board run a
+  *confirmation* rather than a different experiment.
+
+### The four kinds of evidence we use
+
+| Kind | Example | Why it is convincing |
+| --- | --- | --- |
+| **Two independent routes to the same numbers** | planar file vs interleaved record; one sample at a time vs whole blocks | Both routes are computed by different code paths, so a wrong stride, offset or window refill makes them *disagree* |
+| **An oracle** | `qsort()` from the standard library sorts the same numbers | The library is not ours and not written by us; agreement is strong evidence |
+| **Invariants that must hold** | output is sorted; the multiset of values is unchanged; checksums match; the output is byte-identical for 1, 2, 3, 5 and 8 threads | These catch classes of bugs rather than one example: a lost value, a duplicated value, a half-merged phase |
+| **Deliberate bad input** | a 3-byte file, a 6-float "record", a NULL path, one nudge to one sample, a fetch for an unknown job | Proves the system *refuses* correctly instead of quietly doing something wrong |
+
+### What each binary is asking
+
+| Binary | The one-sentence question it answers | Checks |
+| --- | --- | --- |
+| `test_protocol` | "Is the contract exactly what both sides think it is — 64 KiB blocks, safe message numbers, a checksum that notices damage, a shared region whose arithmetic adds up?" | 137 |
+| `test_sensor` | "Does replaying a file behave like a device: same numbers however you read it, both file layouts agreeing, frames capped, clock exact, junk refused?" | 642 |
+| `test_block_loader` | "Does a stream become blocks and a label that survives the trip — split right, padded right, sealed over the right bytes?" | 116 |
+| `test_mergesort` | "Is a sorted block really sorted, really the same numbers, and really independent of how many threads did it?" | 578 |
+
+The per-module detail — each test and the bug it rules out — is in the M1 and M2
+sections above; this is the machinery and the vocabulary.
+
+### How to explain testing in three sentences
+
+> Every module has a testbench that runs as a plain C program on the host, and the
+> same four programs run on the board after cross-compiling. They do not just call
+> the code and check it does not crash: they compare it against an independent
+> answer — the standard library's `qsort`, or the same recording read through a
+> different layout — and they feed it broken input on purpose to prove it refuses.
+> The last line of each run is the headline: 1473 checks on the host, 0 failed, 0
+> skipped, and on the board the same counts against real telemetry.
+
+---
+
+## The deck, slide by slide — what to say
+
+The deck says *what*; these notes are the *why* and the *how*, in the deck's own
+order. Each slide gets: what is on it, the sentence(s) to say, and an anchor — an
+example, a number or a line of code. Slides with code are explained line by line;
+the code is quoted exactly as it is in the repository.
+
+### Introduction
+
+**Title / Outline** — Say: "A client offloads 64 KB blocks of sensor data; the
+server sorts them on four threads and filters spikes; a pulse tells the client
+when the answer is ready." The outline is the seven sections; no need to read it
+out, just name them.
+
+**The Problem Statement** — The assignment's demands are on the left (parallel
+merge sort, rolling median filter, QNX pulse) and our reading of them on the right
+(real-time constraints, the IOV rule, the architectural rules). Say: "The data
+arrives continuously, so the unit of work cannot be a file — it has to be a
+fixed-size parcel that fits through one message."
+
+**Why a Median Filter Over an Average?** — This slide has the best one-liner in
+the deck: readings `5, 5, 5, 5, 50` average to 14 V but their median is 5 V, and
+5 V is the truth. Say: "One bad sample moves the mean by 9 volts and the median by
+nothing — that is the entire reason for the filter." Then the two design points:
+an **odd** window width (so there is always a middle sample), and the filter runs
+on the **raw copy** because it needs chronological order while the sort destroys it.
+
+**Core Design Principles** — Five claims, each backed by something concrete:
+contract first (`protocol.h` written before the logic), modular pipeline (sensor →
+loader → messages → sort, each testable on the PC), zero padding (16 384 float32 =
+65 536 B exactly), deterministic execution (stable merge ⇒ identical output for
+any thread count), non-blocking server (the ack releases the client immediately),
+and empirical rigor (every number measured on the Pi).
+
+### System Architecture (four diagram slides)
+
+**System overview** — Two boxes, one band, three arrows. Say: "Both programs
+compile the same header. The submit and the ack are messages; the pulse is
+asynchronous. The block crosses as the *second part of an IOV*: the server reads
+48 bytes of header, validates it, and only then pulls the 64 KB payload — so it
+never needs a 64 KB receive buffer just to learn how big the message is."
+
+**Client: connect, offload, collect** — Walk it as a loop: `name_open("sortmed")`,
+retry until the **10-second deadline** (then report and exit, never hang), take
+the next block, `MsgSendv {header, block}`, read the ack, and if it was refused go
+back for the next block; then receive on its own channel for the pulse and fetch
+the result.
+
+**Server: accept, validate, answer** — Say: "One receive loop, and it never sorts
+in that loop." Type switch (submit → validate → **ack, then queue** → sort →
+filter → pulse; fetch → reply the result; anything else → refuse). The reason the
+ack comes before the pulse: an `rcvid` is only valid until it is replied to, so
+the client cannot still be waiting for an answer when a later pulse arrives — it
+supplies its own connection for that.
+
+**Data flow: what changes at each step** — The key sentence on the whole deck:
+**two buffers, not one.** The sort needs the values, the filter needs the *order*
+of those values, so the arriving block is never sorted in place. The sorted copy
+yields the block median as a by-product; the time-ordered copy feeds the rolling
+median.
+
+### Implementation Details
+
+**Virtual Sensor: Architecture & Mechanics** — What is on the slide: the stride/
+offset extraction, the 4096-record window, 128-sample frames, the timestamp
+arithmetic, strict validation and pacing. Say: "The sensor makes a file behave
+like a device: values arrive in frames, on their own clock, and the caller never
+loads the file." Anchor: record 7 of the voltage channel lives at float `4×7+1 =
+29`, **byte 116** of the interleaved file. One nuance to have ready: the window is
+4096 records *unless the caller's frame is larger* — the block loader asks for
+16 384-sample frames, so in the real pipeline the window is 16 384 records, i.e.
+256 KiB of interleaved file per refill.
+
+**Virtual Sensor: Code Walkthrough** — The listing is the read loop; walk it line
+by line:
+
+```c
+while (n < cap) {                       /* never more than one frame */
+    if (s->window_count == 0 ||         /* nothing read yet */
+        s->next < s->window_first ||    /* walked backwards (reset) */
+        s->next >= s->window_first + s->window_count) {   /* past the window */
+        if (sensor_fill(s, s->next) != 0)
+            return (n > 0) ? (int)n : -1;   /* error after some output */
+    }
+    size_t off = (s->next - s->window_first) * s->cfg.stride + s->cfg.offset;
+    dst[n++] = s->window[off];          /* the one channel we asked for */
+    s->next++;
+    s->delivered++;
+}
+```
+
+Say: "Three conditions trigger a refill, and the third one is the interesting
+one: the reader has walked past the end of the window. `off` is the whole
+layout story — stride picks the column, offset picks the channel, and the
+difference of indices is how far into the window we are. A partial read returns
+what it got rather than throwing it away."
+
+**Block Loader: Aggregation & Serialization** — What it does: read frames until
+16 384 samples are collected (65 536 B), fill the descriptor, zero-pad a short
+final block. Say: "60 000 readings become 3 full blocks and one block of 10 848;
+the tail of that last block is zeroed so the bytes are reproducible and no stale
+memory crosses a process boundary." Anchor: the four seals `0xe90d24d2`,
+`0xc98cd3b2`, `0x14c728bb`, `0x362ab592`, identical from either file layout.
+
+**Block Loader: Code Walkthrough** — Walk it:
+
+```c
+got = sensor_read_block(l->sensor, block->samples, PROTO_BLOCK_SAMPLES);
+if (got <= 0) return got;                       /* 0 = end, -1 = error */
+
+if ((uint32_t)got < PROTO_BLOCK_SAMPLES)        /* short final block */
+    memset(&block->samples[got], 0,
+           (PROTO_BLOCK_SAMPLES - (uint32_t)got) * sizeof(float));
+
+desc->samples  = (uint32_t)got;
+desc->checksum = proto_checksum(block->samples, desc->samples * sizeof(float));
+```
+
+Say: "One call fills the block; a short block gets its tail zeroed; the seal is
+computed over **exactly the declared samples**, so the padding cannot change it —
+which is what makes the same recording always produce the same seal." *Note for
+whoever edits the deck:* the slide's listing shows a helper named
+`proto_checksum_block(block->samples, desc->samples)`; that function does not
+exist — the real call is the `proto_checksum(...)` above, with the byte count.
+
+**Protocol Definition: Common IPC Header** — The table on the slide is the whole
+wire format: submit 48 B + block 64 KiB (the two IOV parts), ack 8 B, pulse (1 B
+code + a word), fetch 8 B, result 48 B. Say: "The types start at 0x1000 because
+QNX's own IO message range is 0x100–0x1FF; a static assertion re-checks that
+wherever the QNX headers are visible, so a future change breaks the build instead
+of the server eating system messages." Anchor: `PROTO_STATIC_ASSERT(sizeof(proto_block_t)
+== PROTO_BLOCK_BYTES, block_is_64_kib)` — the 64 KB claim is checked by the
+compiler, not by a comment.
+
+**Protocol Definition: Shared Results Region** — Why it exists: a sorted block
+plus a filtered block is 128 KB, and copying that back through messages would
+move it twice for nothing. Say: "The block still crosses by message — that is
+where the IOV requirement lives — but the *results* are left in shared memory:
+one region, a 24-byte header, then four slots of 16-byte slot header + 64 KiB
+sorted + 64 KiB filtered. The arithmetic: 24 + 4 × (16 + 131 072) = 524 376
+bytes." Then the two mechanisms: a **state word** (`WR2D`) instead of a lock
+shared across processes, and per-array **checksums** so the client can verify what
+it read; `offset` 0 means "not produced" because no real array starts at byte 0.
+
+**Parallel Merge Sort: Phase Architecture** — The slide's four bullets, each with
+a number: threshold 4096 below which the pool costs more than it saves; phase 0
+splits a block into `k = min(n/1024, threads)` slices (4 × 4096 for a block on 4
+workers); phases 1…log₂k merge adjacent pairs, swapping buffers; one `memcpy` puts
+the answer back in the caller's array if the last merge landed in the scratch.
+Then the two claims: a mutex + two condition variables and **no sleeps**; and
+stability (`a[i] <= b[j]`) making the output independent of thread count.
+
+**Parallel Merge Sort: Barrier Code Walkthrough** — Walk `post_phase()`:
+
+```c
+pthread_mutex_lock(&p->lock);
+p->ntasks = ntasks; p->next_task = 0; p->tasks_done = 0;
+pthread_cond_broadcast(&p->work_ready);            /* "there is work" */
+while (p->tasks_done < p->ntasks)
+    pthread_cond_wait(&p->phase_done, &p->lock);   /* wait for the last tick */
+pthread_mutex_unlock(&p->lock);
+```
+
+Say: "The caller is a manager: it publishes the round, wakes the workers, then
+blocks on `phase_done`. Each worker claims the next task index under the mutex,
+runs it, and increments the count; the one that reaches `ntasks` rings the bell.
+The mutex is the scoreboard nobody writes to at the same time, and there is no
+`sleep`, so the round cannot start before the runs it consumes exist — on a slow
+machine it just takes longer, it does not go wrong." Be ready for: *what if the
+barrier were missing?* A merge could read a run that is still being sorted, which
+is a wrong answer that appears and disappears between runs.
+
+### Dataset & File Format
+
+**Synthetic Battery Telemetry (PyBaMM)** — Say: "We need data with a known
+answer, so the telemetry is simulated: one LG M50 cell discharged at 0.5C, 1C and
+2C, four channels, 60 000 samples each at 100 Hz — ten minutes per run — with
+Gaussian noise plus 1.5 % impulsive corruption, and the corruption mask kept
+offline as the answer key." If asked about `44 blocks` on the slide: it is
+720 000 values ÷ 16 384 rounded up; per channel it is 12 series × 4 blocks = 48
+transport blocks, because a block never mixes channels.
+
+**Format Clarification: Planar vs Interleaved** — The two formulas side by side:
+planar `sample_i = file[i]` (stride 1, offset 0), interleaved
+`sample_i = file[4i + k]` (stride 4, offset *k*). Say: "On an interleaved file,
+sorting without choosing a channel sorts seconds against volts against amperes —
+it would run happily and mean nothing. That is why the channel-to-offset mapping
+lives in exactly one function." Then the deck's own conclusion: interleaved is the
+production format; planar is the cross-check that catches a stride mistake.
+
+**Production Payload: Interleaved Record Layout** — The table is the whole file
+format: 16 bytes per record, `[time, voltage, current, temperature]`. Say: "Record
+*n* starts at byte `16n`, and the voltage of record *n* is at `16n + 4`. Extracting
+that column gives the four seals on the slide — the same four the planar file
+produces, which is how we know the extraction is right."
+
+### Dedicated Module Testbenches
+
+Each of these four slides has the same shape — *what it does / how it is done /
+verifiable output* — so use the same three sentences on every one.
+
+**Testbench: Virtual Sensor (`test_sensor`)** — Say: "It asks one question:
+does replaying a file behave like a device? It writes synthetic files with known
+values, reads them one sample at a time and in whole blocks, reads the same
+recording through both layouts, and checks the two agree bit for bit. Then it
+feeds the sensor junk — a missing file, a 3-byte file, a 6-float record — and
+requires a named rejection rather than a crash." 15 tests, 642 checks.
+
+```c
+/* the two-route idea, in one line */
+planar  = sensor_open(td_voltage_path(), NULL);          /* stride 1, offset 0 */
+strided = sensor_open(td_interleaved_path(), &cfg);      /* stride 4, offset 1 */
+/* ... every sample of both must be bit-identical */
+```
+
+**Testbench: Protocol Definition (`test_protocol`)** — Say: "This one is about the
+contract, and most of it is checked by the compiler before the tests even run.
+Then the tests pin what a compiler cannot: the message numbers stay clear of
+QNX's range, the checksum notices a single changed byte, and a short block's
+unused tail cannot affect its seal." 12 tests, 137 checks.
+
+```c
+T_CHECK_SIZE(sizeof(proto_block_t), 65536);          /* the 64 KB claim */
+T_CHECK(PROTO_MSG_SUBMIT > 0x1FF);                   /* not a kernel type */
+T_CHECK_SIZE(proto_checksum("", 0), 0x811c9dc5u);    /* the definition */
+block->samples[777] += 0.001f;                       /* one nudge ... */
+T_CHECK_INT(proto_submit_verify(&msg, block), 0);    /* ... and it is refused */
+```
+
+**Testbench: Block Loader (`test_block_loader`)** — Say: "It builds a ramp whose
+values are known exactly (0, 0.5, 1.0, …), so every expected number can be
+written down, checks a 20 000-sample stream splits as 16 384 + 3616 and reassembles
+bit-for-bit, then runs the real recording through both file layouts and requires
+**byte-identical blocks and descriptors**." 8 tests, 116 checks.
+
+**Testbench: Parallel Merge Sort (`test_mergesort`)** — Say: "The witness here is
+`qsort` from the standard library: sort the same numbers both ways and they must
+agree. Then the properties a single comparison cannot prove: the output is ordered,
+it is the same multiset of values, and it is byte-identical whether one, two,
+three, five or eight threads did the work." Then the shapes: all-equal input,
+two-value ties, presorted, reverse-sorted, sawtooth, `±0.0`, denormals, the
+threshold sizes 4095/4096/4097, and twenty sorts on one pool. 13 tests, 578 checks.
+
+### Two-Fold Verification & Results
+
+**Two-Fold Verification Strategy** — Say why both folds exist, because this is the
+slide that has to convince: "Fold one is the host testbenches — fast, easy to
+instrument, they can compare against `qsort` and feed broken input. Fold two is the
+same programs cross-compiled and running on the board: a different compiler, a
+different C library and a different CPU. When the board prints the same counts and
+the same medians, the only thing left that could differ is the kernel — and that is
+what the shared-memory region and the pulse will exercise in M3/M4." Numbers to
+quote: **1473 checks on the host, 0 failed, 0 skipped**; on the board
+`test_protocol` 137, `test_block_loader` 116, `test_mergesort` 578 — all 0 failed,
+0 skipped.
+
+**Target Testbench Setup** — Hardware, not a simulator: Raspberry Pi 4 Model B,
+four Cortex-A72 cores, QNX 8.0.0 booting straight into RAM from the image on the
+SD card, driven over an FTDI serial adapter on `/dev/ser1` at 115200 8N1. Say:
+"Nothing is copied to the board and nothing is mounted — the programs *and* the
+telemetry are inside the image, so a run cannot pick up a stale file."
+
+**The nine console slides** — one sentence each, and point at the last line of the
+screenshot:
+
+| Slide | Say |
+| --- | --- |
+| Board boot | "All four cores come up (`procnto-smp-instr`), then the shell prompt — that prompt is the proof the image booted." |
+| Protocol layer | "The same suite as the host. Note the screenshot is from the image *before* the shared-results-region tests — it shows 82 checks; the current suite prints 137, so re-capture after the next flash." |
+| Virtual sensor | "642 checks, and the `sensor: …` lines are the test failing on purpose — every one is followed by `ok`." |
+| Block loader | "116 checks: the interleaved file produces the same blocks and the same seals as the host." |
+| On-board payload | "`cksum` of the files inside the image matches the host's, then `loader_demo` accepts all four blocks — the data itself is bit-identical, not just the code." |
+| Live sensor streaming | "`sensor_demo` at 10 Hz, paced by the monotonic clock: the sensor can replay in real time, not as fast as the CPU allows." |
+| Parallel sorting | "578 checks on the board. The sort is not faster-but-different: the medians and the plan line are the host's." |
+| Multi-core execution | "Four workers, and the plan line reads `4 partitions, 2 merge phases, 7 tasks` — that line is the proof the parallel path ran." |
+| Core scaling sweep | "1 → 2 → 4 workers: 2.278 → 1.253 → 0.757 ms per block, with the medians unchanged." |
+
+**Benchmark Analysis and Throughput** — The table (1 / 1.82× / 3.01×) and the
+headline: a 64 KiB block is **163.84 seconds** of 100 Hz telemetry and it sorts in
+**0.757 ms**, about **216 000× real time**. Then volunteer the caveats before
+anyone asks: "These are one run per point, so treat ±10–20 % as noise; the
+deterministic evidence is the plan line, and the *medians* being identical across
+thread counts is what shows the parallelism changed the speed, not the answer."
+
+### Applications & Conclusion
+
+**Practical Industrial Applications** — One sentence per bullet: battery packs
+(pack transients need filtering while cell distributions need sorting), edge
+gateways (keeping acquisition responsive while 64 KB blocks are processed),
+automotive telemetry (deterministic, reproducible sorting across bus channels),
+flight data recorders (verifiable, checksummed statistical descriptors).
+
+**Summary and Project Status** — Say where we are: M1 and M2 complete and verified
+on hardware; 1473 host checks plus the on-board suites; 0.757 ms per block and
+3.01× on four cores. Then the next steps, honestly: M3 is the client/server IPC and
+the rolling median filter, M4 the pulse wiring and the end-to-end timing — the
+protocol half of both already exists, and the shared region the results will use is
+already defined and tested.
+
+*Two lines in the deck are worth correcting before the presentation:*
+`proto_checksum_block(...)` on the block-loader code slide is not a function we
+have, and the merge-sort testbench slide says the invariance test covers
+"1, 2, 4 and 8" threads, while the test actually uses **1, 2, 3, 5 and 8** (the
+*benchmark* sweep is the 1/2/4 one).
+
+---
+
 ## Numbers to have ready
 
 | Fact | Value |
