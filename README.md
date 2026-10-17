@@ -17,6 +17,7 @@ the injection mask a median filter can be scored against.
 | `IMPLEMENTATION.md` | how each stage of the service works, in pipeline order, with diagrams |
 | `STUDY-GUIDE.md` | the same project in plain language, by milestone, for demos and revision |
 | `REPRODUCE.md` | every command to build and run it, host and target, with expected output |
+| `FINAL-RUN.md` | the integrated client/server run on the board: commands, expected console output, what to check |
 | `data/` | PyBaMM generator for the synthetic client payload (`src/battery_dataset/`) |
 | `data/artifacts/dataset/` | generated payload — `.npz`, manifest, CSV (git-ignored, ≈ 20 MiB) |
 | `data/artifacts/figures/` | generated diagnostic figures (committed; shown below) |
