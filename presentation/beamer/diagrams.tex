@@ -10,7 +10,6 @@
 %   \serverFlowchartSlide  server flowchart
 %   \dataFlowSlide         data flow diagram
 %   \columnsimage{...}     a console screenshot with its caption
-%   \boardPhoto            the board photograph slot
 % ---------------------------------------------------------------------------
 
 % --- a screenshot with its caption, side by side ---------------------------
@@ -30,17 +29,6 @@
       {\scriptsize #3}
     \end{column}
   \end{columns}%
-}
-
-% --- the board photograph --------------------------------------------------
-
-\newcommand{\boardPhoto}{%
-  \begin{tikzpicture}
-    \node[draw=rtmAccent2, line width=0.8pt, fill=rtmSurface2,
-          rounded corners=1pt, minimum width=54mm, minimum height=26mm,
-          align=center, font=\ttfamily\scriptsize, text=rtmMuted, inner sep=2mm]
-      {[ board photograph ]\\[1mm]Raspberry Pi 4 Model B};
-  \end{tikzpicture}%
 }
 
 % --- 1. System overview: block diagram -------------------------------------

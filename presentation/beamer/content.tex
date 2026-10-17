@@ -106,31 +106,30 @@
 % ---------------------------------------------------------------------------
 \begin{frame}{What we set out to build}
   \begin{columns}[t, onlytextwidth]
-    \begin{column}{0.46\textwidth}
+    \begin{column}{0.50\textwidth}
       \begin{tech}
-        \textbf{Protocol first} \\
-        The message definition was written before any QNX code: it fixes the
-        contract the sort, the filter and the IPC must all satisfy, and it
-        can be proved correct on the host.
+        \textbf{Agree on the message first} \\
+        Both programs share one header file. It was written before any QNX
+        code, so the client and the server could not drift apart — and it can
+        be tested on a PC.
       \end{tech}
       \vskip2mm
       \begin{tech}
-        \textbf{Prove it off the board} \\
-        Every stage that does not need the kernel is tested on Windows
-        first. The board is the last step, not the debugging loop.
+        \textbf{Build it in stages, test it off the board} \\
+        Sensor, then loader, then sort — each finished and tested before the
+        next starts. Almost none of the code needs QNX, so it runs on a PC
+        first; the board is where we take the numbers, not where we debug.
       \end{tech}
     \end{column}
-    \begin{column}{0.50\textwidth}
+    \begin{column}{0.46\textwidth}
       \begin{itemize}
-        \item \concept{64 KiB is the unit of work} — 16\,384 float32 samples,
-              so the size requirement is met with no padding.
-        \item \concept{Deterministic output} — the answer must not depend on
-              how many threads the machine happened to run.
-        \item \concept{Honest measurement} — timings and checksums come off
-              the Raspberry Pi 4, not off a desktop.
+        \item \concept{One block, one job} — every block is exactly 64 KiB,
+              so the size requirement needs no special case.
+        \item \concept{Same answer every time} — the result must not change
+              with the number of threads, so it can be checked.
+        \item \concept{Show the receipts} — every number on a slide is a
+              command run on the Raspberry Pi 4.
       \end{itemize}
-      \vskip2mm
-      \key{Sort, filter, notify — and show the evidence}
     \end{column}
   \end{columns}
 \end{frame}
@@ -186,79 +185,180 @@
 % ---------------------------------------------------------------------------
 \begin{frame}{The message definition}
   \begin{columns}[t, onlytextwidth]
-    \begin{column}{0.52\textwidth}
-      \begin{table}
-        \centering
-        \begin{tabular}{@{}ll@{}}
-          \toprule
-          \rtmtablehead{Message} & \rtmtablehead{Purpose} \\
-          \midrule
-          \texttt{SUBMIT}  & header + 64 KiB block, two IOV parts \\
-          \texttt{ACK}     & accepted, or why not \\
-          \texttt{FETCH}   & asks for the result of a job \\
-          \texttt{RESULT}  & median + offset descriptor \\
-          \texttt{PULSE}   & asynchronous completion, code 16 \\
-          \bottomrule
-        \end{tabular}
-      \end{table}
+    \begin{column}{0.50\textwidth}
+      One header file, \texttt{protocol.h}, is compiled into both programs.
+      The whole exchange is five messages:
       \vskip1mm
-      \begin{tech}
-        The block is a type, not a convention: a static assertion pins it to
-        exactly 65\,536 bytes. The descriptor travels beside it, so the server
-        reads 48 bytes before pulling 64 KiB.
-      \end{tech}
+      \begin{center}
+      \begin{tabular}{@{}ll@{}}
+        \toprule
+        \rtmtablehead{Message} & \rtmtablehead{What it does} \\
+        \midrule
+        \texttt{SUBMIT} & header + block, one send \\
+        \texttt{ACK}    & accepted, or why not \\
+        \texttt{PULSE}  & sent later, when the work is done \\
+        \texttt{FETCH}  & client asks for the answer \\
+        \texttt{RESULT} & the median and the offset descriptor \\
+        \bottomrule
+      \end{tabular}
+      \end{center}
     \end{column}
-    \begin{column}{0.44\textwidth}
-      \begin{itemize}
-        \item \concept{Checksum covers only the declared samples.} A short
-              final block's unused tail would otherwise be checksummed.
-        \item \concept{Message types start at 0x1000}, clear of the QNX system
-              range, re-checked wherever the QNX headers are visible.
-        \item \concept{Types are asserted at offset zero} — the kernel
-              dispatches on the first two bytes.
-      \end{itemize}
+    \begin{column}{0.46\textwidth}
+      \begin{tech}
+        \textbf{The block travels beside the descriptor} \\
+        The server reads 48 bytes, decides, then pulls the 64 KiB. It never
+        needs a 64 KiB buffer just to learn how big the message is.
+      \end{tech}
+      \vskip2mm
+      \begin{highlight}
+        \textbf{The checksum covers only the declared samples} \\
+        A short final block's tail is never checksummed, so the value cannot
+        depend on stale buffer contents.
+      \end{highlight}
+      \vskip2mm
+      {\footnotesize The client chooses the \concept{job id} and the server
+       echoes it in the ack, the pulse and the result, which is how a
+       completion is matched to its request.}
     \end{column}
   \end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{Implementation: the virtual sensor}
+  \begin{columns}[t, onlytextwidth]
+    \begin{column}{0.50\textwidth}
+      \begin{itemize}
+        \item The recording is a headerless file of float32 values, so its
+              size is its only metadata: sample count is
+              \texttt{bytes / 4}.
+        \item Samples are read through a \concept{sliding window} of 4096,
+              refilled as the reader advances — never the whole file at once.
+        \item A read delivers at most \concept{one frame} (128 samples), as a
+              device would. Gathering frames into a 64 KiB block is the
+              client's job, not the sensor's.
+        \item The timestamp is computed, not measured:
+              \texttt{index / rate}, so it does not drift with the host.
+      \end{itemize}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \begin{tech}
+        \textbf{Nothing is assumed about the file} \\
+        A missing file, an empty file, a size that is not a whole number of
+        float32 values, a frame or rate out of range — each is refused by
+        name, and the message says which one it was.
+      \end{tech}
+      \vskip2mm
+      \begin{highlight}
+        \texttt{test\_sensor} — \textbf{15 tests, 642 checks} \\
+        Exact float round trips, frame capping, end of file, window refills
+        at unaligned offsets, timestamps and paced reads.
+      \end{highlight}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{Implementation: the block loader}
+  \begin{columns}[t, onlytextwidth]
+    \begin{column}{0.50\textwidth}
+      \begin{itemize}
+        \item Turns the sample stream into the unit the service moves:
+              \concept{16\,384 samples = exactly 64 KiB}, one block per read
+              of the sensor.
+        \item Alongside each block it fills a \concept{descriptor}: sequence,
+              first sample, count, rate, channel, min/max and the checksum.
+        \item \concept{A short final block is zero-padded.} 60\,000 samples
+              become three full blocks and one of 10\,848.
+      \end{itemize}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+      \begin{highlight}
+        Why padding matters \\
+        The whole 64 KiB crosses to another program, and uninitialised bytes
+        should never travel. Zeroing them also makes the block reproducible.
+      \end{highlight}
+      \vskip2mm
+      \begin{tech}
+        \textbf{\texttt{test\_block\_loader} — 8 tests, 116 checks} \\
+        A synthetic 20\,000-sample file splitting as 16\,384 + 3616 and
+        reassembling exactly, and a single changed sample being caught.
+      \end{tech}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}[fragile]{Implementation: the parallel merge sort}
+  \begin{columns}[t, onlytextwidth]
+    \begin{column}{0.50\textwidth}
+      \begin{itemize}
+        \item A pool of POSIX worker threads sorts one block at a time.
+        \item \textbf{Phase 0}: each worker sorts one partition.
+        \item \textbf{After that}: pairs of sorted runs are merged, halving
+              the number until one run covers the block.
+        \item The phase boundary is a \concept{real barrier} — one mutex and
+              two condition variables. Nothing is ordered by a sleep.
+        \item One scratch buffer is ping-ponged between phases: one
+              allocation per block, none per merge.
+      \end{itemize}
+    \end{column}
+    \begin{column}{0.46\textwidth}
+\begin{lstlisting}
+/* merge: take the smaller head */
+while (i < n1 && j < n2)
+    out[k++] = (a[i] <= b[j]) ? a[i++] : b[j++];
+\end{lstlisting}
+      \vskip1mm
+      \begin{highlight}
+        \texttt{test\_mergesort} — \textbf{13 tests, 578 checks} \\
+        Every size from 0 to 64, the sizes around the 4096 threshold, the
+        partition boundaries, all-equal and reverse-sorted input,
+        $\pm$0.0 and the float extremes.
+      \end{highlight}
+    \end{column}
+  \end{columns}
+  \vskip1mm
+  \key{Equal values keep their order, so 1 worker and 8 agree exactly}
 \end{frame}
 
 % ---------------------------------------------------------------------------
 \dataFlowSlide
 
 % ---------------------------------------------------------------------------
-\begin{frame}{One recording, two file layouts}
+\begin{frame}{One recording on disk}
   \begin{columns}[t, onlytextwidth]
     \begin{column}{0.48\textwidth}
-      \begin{table}
-        \centering
-        \begin{tabular}{@{}lll@{}}
-          \toprule
-          \rtmtablehead{Layout} & \rtmtablehead{Stride} & \rtmtablehead{Size} \\
-          \midrule
-          Planar      & 1 float  & 240\,000 B \\
-          Interleaved & 4 floats & 960\,000 B \\
-          \bottomrule
-        \end{tabular}
-      \end{table}
+      One channel is one file — a flat run of float32 values, no header:
       \vskip1mm
-      \begin{tech}
-        \textbf{One code path.} A sample is read at
-        \texttt{window[(i - first) * stride + offset]}, so a planar file is
-        \texttt{\{0, 1\}} and an interleaved record is \texttt{\{k, 4\}}.
-        Neither the loader nor the client knows which it was given.
-      \end{tech}
+      \begin{center}
+      \begin{tabular}{@{}ll@{}}
+        \toprule
+        \rtmtablehead{File} & \rtmtablehead{Contents} \\
+        \midrule
+        \texttt{r1\_voltage.bin} & 60\,000 samples, 240\,000 B \\
+        \texttt{r1\_current.bin} & 60\,000 samples, 240\,000 B \\
+        \bottomrule
+      \end{tabular}
+      \end{center}
+      \vskip1mm
+      \begin{itemize}
+        \item A whole file is \concept{one signal}, so a minimum or maximum
+              over it means something.
+        \item The file length is the only metadata there is: 240\,000 bytes
+              is exactly 60\,000 values.
+      \end{itemize}
     \end{column}
     \begin{column}{0.48\textwidth}
-      \begin{warn}
-        \textbf{The trap.} The interleaved file stores
-        \texttt{time, voltage, current, temperature}, while the protocol
-        enumerates \texttt{time, current, voltage, temperature}. Voltage is
-        field \textbf{1}, not 2. The mapping lives in exactly one function.
-      \end{warn}
+      \begin{tech}
+        \textbf{Reading a sample is arithmetic} \\
+        Sample \texttt{i} sits at byte \texttt{i * 4}. The loader turns that
+        into blocks by reading a continuous run — no seeking per sample.
+      \end{tech}
       \vskip2mm
       \begin{highlight}
-        Both layouts are carried on purpose: they are different access
-        patterns that disagree in field order, and a test asserts they
-        produce \concept{byte-identical blocks}.
+        \textbf{The channel is carried, not assumed} \\
+        The blocks are labelled with which signal they hold, so a block of
+        voltage can never be presented as current downstream.
       \end{highlight}
     \end{column}
   \end{columns}
@@ -413,8 +513,8 @@
               payload.
         \item \concept{Determinism} — bit-identical output for 1 to 8
               threads; one changed sample must be caught.
-        \item \concept{Real payload} — every block against \texttt{qsort},
-              and the two layouts against each other.
+        \item \concept{Real payload} — every block of real data compared
+              against \texttt{qsort}, and the descriptor's min/max.
       \end{itemize}
     \end{column}
   \end{columns}
@@ -459,16 +559,25 @@
 
 \begin{frame}{The board}
   \begin{columns}[c, onlytextwidth]
-    \begin{column}{0.48\textwidth}
+    \begin{column}{0.44\textwidth}
       \begin{tech}
         \textbf{Target} \\
         Raspberry Pi 4 Model B, four Cortex-A72 cores, booting QNX 8.0.0 from
         an SD card and driven over a serial console. No network dependency
         for any test, which keeps the measurements repeatable.
       \end{tech}
+      \vskip2mm
+      \begin{tech}
+        \textbf{How we talk to it} \\
+        A USB-to-serial adapter on the GPIO header: TX and RX crossed, plus
+        ground and 3.3\,V. That is the whole interface the runs below used —
+        the board has no keyboard, display or network in the loop.
+      \end{tech}
     \end{column}
-    \begin{column}{0.50\textwidth}
-      \boardPhoto
+    \begin{column}{0.54\textwidth}
+      \begin{center}
+        \includegraphics[height=0.60\textheight, keepaspectratio]{assets/board-wiring}
+      \end{center}
     \end{column}
   \end{columns}
 \end{frame}
@@ -499,17 +608,17 @@
 % ---------------------------------------------------------------------------
 \begin{frame}{Console: the block loader}
   \columnsimage{loader}{0.5}{\texttt{test\_block\_loader /data} — 116 checks,
-    none failed. This is the suite that proves the planar and interleaved
+    none failed. This is the suite that proves the block partition
     routes produce byte-identical blocks and descriptors, and that a single
     changed sample is detected.}
 \end{frame}
 
 % ---------------------------------------------------------------------------
-\begin{frame}{Console: the payload is intact, in both layouts}
-  \columnsimage{cksum}{0.5}{\texttt{cksum} of both payload files inside the
-    image, then \texttt{loader\_demo} in each layout. The four block checksums
-    printed by the planar run and by the interleaved run are the same four
-    values — the two file layouts produce identical blocks, on the target.}
+\begin{frame}{Console: the payload inside the image}
+  \columnsimage{cksum}{0.5}{\texttt{cksum} of the payload files as they sit in
+    the image, then \texttt{loader\_demo} reading one of them. The values match
+    the host's, so the bytes on the board are the bytes we generated — and the
+    four block checksums show the blocks were assembled deterministically.}
 \end{frame}
 
 % ---------------------------------------------------------------------------
@@ -544,14 +653,6 @@
     $\rightarrow$ \textbf{0.757 ms}, which is
     \num{3.01$\times$} on four cores. The medians, ranges and order verdicts
     are identical in all three runs — only the time moves.}
-\end{frame}
-
-% ---------------------------------------------------------------------------
-\begin{frame}{Console: both on-disk layouts, through the pipeline}
-  \columnsimage{layouts}{0.5}{The planar and interleaved recordings through
-    the same command. \num{0.755} ms per block against \num{0.741} ms — the
-    two layouts are the same signal, so the difference is run-to-run noise,
-    and the medians and ranges match to the digit.}
 \end{frame}
 
 % ---------------------------------------------------------------------------
@@ -596,10 +697,11 @@
   \begin{columns}[t, onlytextwidth]
     \begin{column}{0.48\textwidth}
       \begin{warn}
-        \textbf{The channel-order trap} \\
-        The interleaved file's field order differs from the protocol's
-        enumeration. Sorting field 2 of each record instead of field 1 would
-        have sorted current and called it voltage — silently.
+        \textbf{The short final block} \\
+        60\,000 samples do not divide evenly: the last block is 10\,848
+        samples in a 16\,384-slot buffer. Everything downstream must respect
+        the descriptor's count, and the padding is what keeps the checksum
+        from depending on stale memory.
       \end{warn}
       \vskip2mm
       \begin{warn}

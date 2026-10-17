@@ -9,7 +9,7 @@ Project presentation for **26ELC331 — Real-Time Operating Systems**, Project 1
 | --- | --- |
 | `main.tex` | the shell — `\input`s the three below |
 | `content.tex` | the slides. **Edit this one.** |
-| `diagrams.tex` | diagram slides and the layout helpers (`\columnsimage`, `\boardPhoto`) |
+| `diagrams.tex` | diagram slides and the layout helper `\columnsimage` |
 | `theme.tex` | palette, chrome, boxes, code style, TikZ styles |
 | `deck.tex` | preamble and title metadata (authors, course) |
 | `assets/` | console screenshots, cropped for the deck |
@@ -55,22 +55,25 @@ When adding a slide, keep to these and it will fit:
 points is invisible; more than about 10 pt clips the last line, so check the
 log after editing.
 
-## Placeholders
+## Still to come
 
-Two frames are waiting on material from elsewhere, and both are marked:
-
-- **`\boardPhoto`** in `diagrams.tex` draws a labelled box. Replace the node
-  with `\includegraphics[width=\linewidth]{assets/board.jpg}` when the board
-  photograph is available.
-- The **diagrams** (`\systemOverviewSlide`, `\clientFlowchartSlide`,
-  `\serverFlowchartSlide`, `\dataFlowSlide`) are drafted in `diagrams.tex` and
-  are being drawn separately — each macro can be replaced on its own without
-  touching `content.tex`.
+The **diagrams** (`\systemOverviewSlide`, `\clientFlowchartSlide`,
+`\serverFlowchartSlide`, `\dataFlowSlide`) are drafted in `diagrams.tex` and are
+being drawn separately — each macro can be replaced on its own without touching
+`content.tex`.
 
 ## Console evidence
 
-`assets/` holds eleven crops of the board's serial console, one per command
-or test: boot, the four test suites, both `cksum` values, the loader and
-sensor demos, the two pipeline layouts, and the worker sweep. The filenames
-say which is which; `Console-outputs/` holds the originals alongside the two
-full serial logs they were taken from.
+`assets/` holds nine crops of the board's serial console, one per command or
+test: boot, the four test suites, the `cksum` values, the loader and sensor
+demos, the four-worker pipeline run, and the worker sweep — plus the board's
+wiring diagram on the board slide. The filenames say which is which;
+`Console-outputs/` holds the originals alongside the two full serial logs they
+were taken from. The wiring diagram is `assets/board-wiring.png`, flattened onto
+white and downscaled from the `PI_bb.png` Fritzing export at the folder root.
+
+Only the planar file layout appears in the deck: it is what the sensor, the
+loader and the demos are run against, and it is the layout the representative
+runs were captured with. The generator also exports an interleaved record, and
+the sort's two real-data tests read that one, but the slides do not depend on
+it.
