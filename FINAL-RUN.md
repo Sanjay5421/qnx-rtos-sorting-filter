@@ -176,6 +176,24 @@ The client verifies the shared arrays itself before using them: it checks the
 slot's `job_id` and state word against the result it fetched and recomputes both
 FNV-1a checksums, so a mismatch would have been reported instead of written out.
 
+## 4b. Figures from the run
+
+On the PC, with the four files in one directory (the card's drive letter, or a copy
+of it):
+
+```sh
+cd data
+uv run python ../tools/plot_run.py D:\
+```
+
+Writes three PNGs (150 dpi) into that directory: `run_cleaned_vs_noisy.png` — the
+noisy and cleaned series over the whole 600 s with every removed sample marked;
+`run_zoom.png` — a few seconds where a spike is visibly cut; `run_summary.png` —
+the sorted curve with the median, the per-block medians, and the removals over
+time. A missing `sorted.bin` or `medians.csv` just drops its panel. It prints the
+sample count, the duration, how many samples differ between raw and filtered, and
+the medians it read.
+
 ## 5. Board: the module suites (optional)
 
 Run from `/tmp` as well; the payload argument is the `/data` directory. The first
