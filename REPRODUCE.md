@@ -199,6 +199,10 @@ The board boots the image from section 9 and is driven from the serial console
 at 115200 8N1. Nothing is copied to the board and nothing is mounted: the
 programs and their payload are inside the image.
 
+This section covers the test suites. The *service* — the client and server
+programs talking to each other — has its own run sheet in
+[FINAL-RUN.md](FINAL-RUN.md).
+
 ### On the SD card's FAT partition
 
 | File | Notes |

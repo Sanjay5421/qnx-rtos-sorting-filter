@@ -1,0 +1,178 @@
+# Final run — the integrated service on the Raspberry Pi
+
+The end-to-end run of the finished M3/M4 path: the client offloads the production
+recording in 64 KiB blocks, the server sorts and filters each one, taps the client
+with a pulse, and the client collects the median and the arrays out of the shared
+region — then writes the completed run back to disk.
+
+**Status.** Both programs build for `aarch64le` with no warnings, both are inside
+the image, and the host suite is green (9037 checks, 0 failed). **This run has not
+been executed on hardware yet** — it is the next thing to do. Section 6 lists what
+to look at if it misbehaves.
+
+| Step | Where | What happens |
+| --- | --- | --- |
+| 1 | host | verify the image, copy it to the card |
+| 2 | board | start `sortmed-server` |
+| 3 | board | run `sortmed-client` over the recording |
+| 4 | board | check the four files it wrote |
+| 5 | board | optional: the module suites |
+| 6 | board | stop the server |
+
+---
+
+## 1. Host: the image you are about to flash
+
+```sh
+cd RT-MOMS/images
+sha256sum ifs-rpi4.bin
+```
+
+| | |
+| --- | --- |
+| Path | `RT-MOMS/images/ifs-rpi4.bin` |
+| Size | 37 742 192 B |
+| SHA-256 | `32c303e8249164fbc69c076a6f3dca28fb0fd14fc79b5f3e97e7cfb2f36d2e83` |
+
+Copy it to the SD card's FAT partition beside `config.txt` (`kernel=ifs-rpi4.bin`)
+and the firmware files (`start4.elf`, `fixup4.dat`, `bcm2711-rpi-4-b.dtb`,
+`overlays/`), then verify the copy:
+
+```bat
+certutil -hashfile D:\ifs-rpi4.bin SHA256
+```
+
+The image carries the programs (`/bin/sortmed-server`, `/bin/sortmed-client`, the
+suite binaries) **and** the telemetry (`/data/bin/...`), so nothing else is copied
+to the card and nothing is mounted on the board.
+
+## 2. Board: start the service
+
+At the `#` prompt on the serial console (115200 8N1):
+
+```sh
+cd /tmp                                  # the only writable place: /tmp is /dev/shmem (RAM)
+sortmed-server &
+```
+
+Expected first line:
+
+```
+sortmed-server: service 'sortmed' ready; shm=/sortmed-results (524376 bytes)
+```
+
+Wait for the region to exist — this is the clean "the server is up" signal,
+because the server creates the region *before* it registers the service name:
+
+```sh
+waitfor /dev/shmem/sortmed-results
+```
+
+## 3. Board: the run
+
+```sh
+sortmed-client /data/bin/Chen2020_c1_T25_discharge.bin interleaved voltage 100
+```
+
+Arguments: the recording, its layout (`planar` or `interleaved`), the channel to
+work on (`time`, `current`, `voltage`, `temperature`), and the sample rate.
+
+Expected output — one line per block, then a summary, then the write-back:
+
+```
+job=1 samples=16384 block_median=3.9618 outliers=… elapsed=… ns
+job=2 samples=16384 block_median=3.6416 outliers=… elapsed=… ns
+job=3 samples=16384 block_median=3.3841 outliers=… elapsed=… ns
+job=4 samples=10848 block_median=2.9735 outliers=… elapsed=… ns
+recording complete: samples=60000 global_median=… rolling_filter_width=9 global_outliers=…
+output written: raw.bin (240000 bytes), sorted.bin (240000 bytes), filtered.bin (240000 bytes), medians.csv (4 blocks)
+```
+
+The four block medians are the same numbers `pipeline_demo` prints (`3.9618`,
+`3.6416`, `3.3841`, `2.9735`) — the server's `median_of_sorted()` and the demo read
+the same element of the same sorted block. `outliers=` is what the rolling Hampel
+filter (width 9, threshold 4 σ) rejected in that block; `elapsed=` is the server's
+own processing time for it.
+
+## 4. Board: verify the result
+
+```sh
+ls -l raw.bin sorted.bin filtered.bin medians.csv
+cksum raw.bin
+cksum /data/bin/channels/r1_voltage.bin
+cat medians.csv
+```
+
+| Check | Expected |
+| --- | --- |
+| `raw.bin`, `sorted.bin`, `filtered.bin` | 240 000 B each (60 000 float32 samples) |
+| `cksum raw.bin` vs `cksum /data/bin/channels/r1_voltage.bin` | both print `2261229843 240000` — `raw.bin` is the voltage column of the interleaved record and the planar file is the same recording, so the bytes must match (the test `test_real_layouts_agree` asserts exactly that) |
+| `medians.csv` | a header plus 4 rows; the `median` column must equal the four `block_median=` values above |
+| `sorted.bin` | non-decreasing — the sort's own order is also re-checked by `test_mergesort` |
+
+The client verifies the shared arrays itself before using them: it checks the
+slot's `job_id` and state word against the result it fetched and recomputes both
+FNV-1a checksums, so a mismatch would have been reported instead of written out.
+
+## 5. Board: the module suites (optional)
+
+Run from `/tmp` as well; the payload argument is the `/data` directory. The first
+two need no payload at all.
+
+```sh
+test_shared_memory        # the region's bounds and layout
+test_median               # the rolling filter
+test_mergesort /data      # the parallel sort
+test_sensor /data         # the virtual sensor
+test_block_loader /data   # the loader
+test_protocol             # the message definition
+```
+
+| Binary | Host result | Seen on the board so far |
+| --- | --- | --- |
+| `test_sensor /data` | 642 checks, 0 failed, 0 skipped | reached `test_real_block_partition`, tail not captured |
+| `test_protocol` | 137 checks, 0 failed, 0 skipped | 82 with the earlier image (before the shared-region tests) |
+| `test_block_loader /data` | 116 checks, 0 failed, 0 skipped | 116, 0 failed, 0 skipped |
+| `test_mergesort /data` | 578 checks, 0 failed, 0 skipped | 578, 0 failed, 0 skipped |
+| `test_median` | 7551 checks, 0 failed, 0 skipped | not yet |
+| `test_shared_memory` | 13 checks, 0 failures | not yet |
+
+`0 failed` **and** `0 skipped` together mean the suite ran *and* found its payload.
+
+## 6. If something goes wrong
+
+| Symptom | Cause, and what to do |
+| --- | --- |
+| `client: name_open server (start server first)` | The server was not up yet. Start it (section 2) and re-run the client — it makes a single connection attempt, it does not retry |
+| `client: submit … rejected: …` | The server refused the block: `checksum` = it arrived damaged, `version` = the two sides disagree, `busy` = all four result slots are taken, `argument` = malformed header |
+| `client: shared-memory checksum mismatch` | The arrays changed between the server writing them and the client reading them — treat the run as invalid and run it again |
+| `perror` on `raw.bin` / `sorted.bin` / … | The current directory is not writable. `cd /tmp` and re-run |
+| Either program faults immediately | The 64 KiB `proto_block_t` on the stack. Heap-allocate that block in the program, or link with a larger stack |
+| Nothing under `/dev/shmem` | The server never created the region — check its ready line; it also unlinks and recreates a stale region at startup, so an old object cannot be read by mistake |
+| `client: recording exceeds 60000 samples` | The client's buffers are sized for 60 000 samples; a longer recording is refused rather than truncated |
+
+## 7. What this run proves
+
+- **The synchronous path**: `name_open` → `MsgSendv` of `{header, 64 KiB block}`
+  (the two-part IOV) → validation → ack.
+- **The asynchronous path**: the server pulsing code 16 with the job id, and the
+  client fetching the result afterwards.
+- **Shared memory**: the sorted and filtered arrays read back out of
+  `/dev/shmem/sortmed-results` and checksum-verified, with per-block descriptors
+  (offsets, length, checksums) instead of bulk data in messages.
+- **The rolling filter**: outliers replaced and counted, per block and then over
+  the whole recording so the block seams have context.
+- **Write-back**: the completed run on disk — raw, sorted, filtered and the
+  per-block medians.
+
+---
+
+## 8. Stop the service
+
+```sh
+slay sortmed-server
+```
+
+On a clean exit the server unlinks the shared region; if it is killed hard the
+region stays behind, and the next server unlinks and recreates it at startup — no
+manual cleanup is needed either way.
