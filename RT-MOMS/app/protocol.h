@@ -40,9 +40,14 @@
  * client goes back to MsgReceive on its own channel, and the completion pulse
  * arrives later, on a connection the client owns.
  *
- * Step 6 exists because a pulse carries one byte of code and one machine word
- * of data, which is enough for a job id but not for a median plus an offset
- * plus a length. The pulse is the notification; the fetch is the payload.
+ * Step 5's pulse carries the median itself: the job id rides in the code
+ * (PROTO_PULSE_DONE + job_id) and the float's 32 bits in the value word. On the
+ * final block of a recording that median is the global one, over every block;
+ * on the others it is that block's median. What cannot fit in a pulse is the
+ * 48-byte memory-offset descriptor, so it lives at the fixed region offset
+ * PROTO_RUN_BASE and the pulse is the notification that it is complete. Step 6
+ * still fetches the per-block result: that block's median, its window, its
+ * outlier count and the offsets of its two arrays.
  *
  * ===========================================================================
  * Assumptions
@@ -76,8 +81,11 @@
 /* Version                                                                    */
 /* ------------------------------------------------------------------------- */
 
-/*: Bumped whenever the layout of any message in this header changes. */
-#define PROTO_VERSION 1u
+/*: Bumped whenever the layout of any message in this header changes.
+ *  2: proto_submit_t gained `flags` (PROTO_SUBMIT_LAST), and the shared region
+ *     gained the run descriptor plus the globally sorted array behind the
+ *     slots, so the server can answer with the whole recording's median. */
+#define PROTO_VERSION 2u
 
 /* ------------------------------------------------------------------------- */
 /* Message types                                                              */
@@ -99,8 +107,20 @@
  * Completion pulse. 16 keeps well clear of the small codes the kernel and the
  * process manager reserve for themselves, and sits inside the user range
  * _PULSE_CODE_MINAVAIL.._PULSE_CODE_MAXAVAIL (checked below on the target).
+ *
+ * A pulse carries one 8-bit code and one 32-bit value, and this one uses both
+ * to satisfy "sends a QNX pulse event back to the client with the calculated
+ * median": the code is PROTO_PULSE_DONE + job_id, and the value word holds the
+ * median as the float's 32 bits (proto_float_to_pulse / proto_pulse_to_float).
+ * The memory-offset descriptor is too large for any pulse encoding, so it sits
+ * at the fixed region offset PROTO_RUN_BASE and the pulse announces that it is
+ * complete; the per-block details still come back through the fetch.
  */
-#define PROTO_PULSE_DONE 16
+#define PROTO_PULSE_DONE    16
+/*: A run is at most PROTO_SHM_SLOTS blocks, so the highest pulse code is
+ *  PROTO_PULSE_DONE + PROTO_SHM_SLOTS; the static assertion at the end of this
+ *  header re-checks that against the kernel's user range on the target. */
+#define PROTO_PULSE_MAX_JOB PROTO_SHM_SLOTS
 
 /* ------------------------------------------------------------------------- */
 /* The 64 KiB block                                                           */
@@ -216,7 +236,6 @@ typedef struct {
 #define PROTO_SHM_HEADER_BYTES      ((uint32_t)sizeof(proto_shm_header_t))
 #define PROTO_SHM_SLOT_HEADER_BYTES ((uint32_t)sizeof(proto_shm_slot_t))
 #define PROTO_SHM_SLOT_BYTES        (PROTO_SHM_SLOT_HEADER_BYTES + 2u * PROTO_BLOCK_BYTES)
-#define PROTO_SHM_BYTES             (PROTO_SHM_HEADER_BYTES + PROTO_SHM_SLOTS * PROTO_SHM_SLOT_BYTES)
 
 /*: Byte offsets, from the start of the region, of a slot and of the two arrays
  *  inside it. No valid offset is 0, which is how a result says "not produced". */
@@ -224,11 +243,63 @@ typedef struct {
 #define PROTO_SHM_SORTED_OFFSET(i)   (PROTO_SHM_SLOT_BASE(i) + PROTO_SHM_SLOT_HEADER_BYTES)
 #define PROTO_SHM_FILTERED_OFFSET(i) (PROTO_SHM_SORTED_OFFSET(i) + PROTO_BLOCK_BYTES)
 
+/* ------------------------------------------------------------------------- */
+/* The run: the server's answer for a whole recording                         */
+/* ------------------------------------------------------------------------- */
+
+/*
+ * A recording is at most PROTO_RUN_SAMPLES values -- the client's buffer size,
+ * and a recording longer than that is refused rather than truncated. Behind the
+ * slots the server keeps the run descriptor below and, next to it, the whole
+ * recording merged into one sorted array: the "calculated median and
+ * memory-offset descriptor" of the project statement. The pulse carries the
+ * median; this descriptor is the memory-offset descriptor; the pulse is the
+ * notification that it is complete.
+ *
+ * The server fills it once the block flagged PROTO_SUBMIT_LAST has been sorted
+ * and filtered, so a client acting on the pulse reads a finished run. magic is
+ * written last, exactly like a slot's state word.
+ */
+#define PROTO_RUN_SAMPLES 60000u
+#define PROTO_RUN_MAGIC   0x534d5255u   /* "SMRU" */
+#define PROTO_RUN_VERSION PROTO_VERSION
+
+typedef struct {
+    uint32_t magic;           /* PROTO_RUN_MAGIC                             */
+    uint32_t version;         /* PROTO_RUN_VERSION                           */
+    uint32_t jobs;            /* blocks in the run (1..PROTO_SHM_SLOTS)      */
+    uint32_t total_samples;   /* values in the sorted array below            */
+    float    global_median;   /* over the whole recording -- the same number
+                               * the completing pulse carries in its value   */
+    uint32_t sorted_offset;   /* byte offset, from the region start, of the
+                               * globally sorted recording                  */
+    uint32_t length;          /* always total_samples                        */
+    uint32_t sorted_checksum; /* FNV-1a over the sorted array                */
+    uint64_t elapsed_ns;      /* server time for the blocks and the merges   */
+} proto_run_t;
+
+#define PROTO_RUN_HEADER_BYTES  ((uint32_t)sizeof(proto_run_t))
+#define PROTO_RUN_BASE          (PROTO_SHM_HEADER_BYTES + \
+                                 PROTO_SHM_SLOTS * PROTO_SHM_SLOT_BYTES)
+#define PROTO_RUN_SORTED_OFFSET (PROTO_RUN_BASE + PROTO_RUN_HEADER_BYTES)
+#define PROTO_RUN_BYTES         (PROTO_RUN_HEADER_BYTES + \
+                                 PROTO_RUN_SAMPLES * PROTO_SAMPLE_BYTES)
+
+/*: The whole region: header, slots, then the run descriptor and its array. */
+#define PROTO_SHM_BYTES (PROTO_SHM_HEADER_BYTES + \
+                         PROTO_SHM_SLOTS * PROTO_SHM_SLOT_BYTES + PROTO_RUN_BYTES)
+
 /* Both headers are read straight out of the mapping, so they must not grow
  * padding; and every offset a result can legitimately carry is non-zero. */
 PROTO_STATIC_ASSERT(sizeof(proto_shm_header_t) == 24, shm_header_is_24_bytes);
 PROTO_STATIC_ASSERT(sizeof(proto_shm_slot_t) == 16, shm_slot_header_is_16_bytes);
 PROTO_STATIC_ASSERT(PROTO_SHM_SORTED_OFFSET(0) != 0, shm_offsets_are_nonzero);
+PROTO_STATIC_ASSERT(sizeof(proto_run_t) == 40, run_header_is_40_bytes);
+PROTO_STATIC_ASSERT(PROTO_RUN_BASE != 0, run_offset_is_nonzero);
+PROTO_STATIC_ASSERT(PROTO_RUN_SORTED_OFFSET % PROTO_SAMPLE_BYTES == 0,
+                    run_sorted_is_sample_aligned);
+PROTO_STATIC_ASSERT(PROTO_RUN_BASE >= PROTO_SHM_SLOT_BASE(PROTO_SHM_SLOTS - 1) +
+                    PROTO_SHM_SLOT_BYTES, run_area_is_behind_the_slots);
 
 /* ------------------------------------------------------------------------- */
 /* Channels                                                                   */
@@ -299,10 +370,17 @@ typedef struct {
  * the result, which is how the client pairs an asynchronous completion with
  * the request that caused it.
  */
+/*: proto_submit_t.flags. A block flagged PROTO_SUBMIT_LAST is the recording's
+ *  last: once it is sorted and filtered the server completes the run's global
+ *  median over its slots and pulse it, because no further block will arrive. */
+#define PROTO_SUBMIT_LAST        0x00000001u
+#define PROTO_SUBMIT_FLAGS_KNOWN (PROTO_SUBMIT_LAST)
+
 typedef struct {
     uint16_t type;          /* PROTO_MSG_SUBMIT                               */
     uint16_t version;       /* PROTO_VERSION                                  */
     uint32_t job_id;
+    uint32_t flags;         /* PROTO_SUBMIT_LAST, or 0                        */
     proto_block_desc_t desc;
 } proto_submit_t;
 
@@ -377,6 +455,16 @@ int proto_submit_verify(const proto_submit_t *msg, const proto_block_t *block);
 void proto_submit_prepare(proto_submit_t *msg, uint32_t job_id,
                           const proto_block_desc_t *desc);
 
+/*
+ * The median a completion pulse carries. A pulse's value word is 32 bits, which
+ * is exactly a float32, so the number itself travels in the event instead of an
+ * index into memory. Both directions are bit-exact: every float32 pattern,
+ * including denormals and the sign of zero, survives the round trip, which
+ * test_protocol checks.
+ */
+int32_t proto_float_to_pulse(float value);
+float   proto_pulse_to_float(int32_t word);
+
 /* Names for logging; never return NULL. */
 const char *proto_status_str(uint16_t status);
 const char *proto_type_str(uint16_t type);
@@ -394,6 +482,10 @@ PROTO_STATIC_ASSERT(PROTO_TYPE_BASE > (unsigned)_IO_MAX, types_above_system_rang
 PROTO_STATIC_ASSERT(PROTO_PULSE_DONE >= _PULSE_CODE_MINAVAIL &&
                     PROTO_PULSE_DONE <= _PULSE_CODE_MAXAVAIL,
                     pulse_code_in_user_range);
+/* The job id rides in the pulse code, and a run is at most PROTO_SHM_SLOTS
+ * blocks, so the highest code the service can send is still a user code. */
+PROTO_STATIC_ASSERT(PROTO_PULSE_DONE + PROTO_PULSE_MAX_JOB <= _PULSE_CODE_MAXAVAIL,
+                    pulse_codes_for_jobs_in_user_range);
 #endif
 
 #endif /* PROTOCOL_H */

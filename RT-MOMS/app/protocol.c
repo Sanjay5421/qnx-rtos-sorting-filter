@@ -59,6 +59,10 @@ int proto_submit_valid(const proto_submit_t *msg)
         return 0;
     if (msg->version != PROTO_VERSION)
         return 0;
+    /* An unknown flag means the sender expects behaviour this build does not
+     * have, so the submit is refused rather than quietly treated as ordinary. */
+    if ((msg->flags & ~PROTO_SUBMIT_FLAGS_KNOWN) != 0)
+        return 0;
     return proto_block_desc_valid(&msg->desc);
 }
 
@@ -93,6 +97,31 @@ void proto_submit_prepare(proto_submit_t *msg, uint32_t job_id,
 
     if (desc != NULL)
         msg->desc = *desc;
+}
+
+/* ------------------------------------------------------------------------- */
+/* The median in a pulse                                                      */
+/* ------------------------------------------------------------------------- */
+
+/*
+ * memcpy rather than a union or a pointer cast: all are bit-exact, but this one
+ * raises no type-punning question under -std=c99 -Wall -Wextra -pedantic, and a
+ * compiler lowers it to a register move. Every float32 pattern survives both
+ * directions, which test_protocol checks over a table of them.
+ */
+
+int32_t proto_float_to_pulse(float value)
+{
+    int32_t word;
+    memcpy(&word, &value, sizeof(word));
+    return word;
+}
+
+float proto_pulse_to_float(int32_t word)
+{
+    float value;
+    memcpy(&value, &word, sizeof(value));
+    return value;
 }
 
 /* ------------------------------------------------------------------------- */

@@ -121,7 +121,9 @@ static void test_shm_layout(void)
     /* A slot is its header plus two full blocks: the sorted one and the
      * filtered one. */
     T_CHECK_SIZE(PROTO_SHM_SLOT_BYTES, 16 + 2 * 65536);
-    T_CHECK_SIZE(PROTO_SHM_BYTES, 24 + PROTO_SHM_SLOTS * PROTO_SHM_SLOT_BYTES);
+    T_CHECK_SIZE(PROTO_SHM_BYTES, 24 + PROTO_SHM_SLOTS * PROTO_SHM_SLOT_BYTES +
+                                  PROTO_RUN_HEADER_BYTES +
+                                  PROTO_RUN_SAMPLES * PROTO_SAMPLE_BYTES);
     T_CHECK_INT(PROTO_SHM_SLOTS, 4);
 
     /* The magic, the version and the state word are what tell a live region
@@ -177,6 +179,76 @@ static void test_result_describes_the_region(void)
      * its header, so no real array ever starts there. */
     T_CHECK(PROTO_SHM_SORTED_OFFSET(0) != 0);
     T_CHECK(PROTO_SHM_FILTERED_OFFSET(0) != 0);
+}
+
+/*
+ * The run: the whole recording's answer, behind the slots. It carries the global
+ * median and the memory-offset descriptor of the globally sorted recording, and
+ * the completing pulse announces it.
+ */
+static void test_run_area(void)
+{
+    T_CHECK_SIZE(sizeof(proto_run_t), 40);
+    T_CHECK(PROTO_RUN_MAGIC != 0);
+    T_CHECK(PROTO_RUN_MAGIC != PROTO_SHM_MAGIC);
+    T_CHECK(PROTO_RUN_MAGIC != PROTO_SLOT_WRITTEN);
+    T_CHECK_SIZE(PROTO_RUN_VERSION, PROTO_VERSION);
+
+    /* Behind the slots, sample-aligned, and inside the region. */
+    T_CHECK(PROTO_RUN_BASE >= PROTO_SHM_SLOT_BASE(PROTO_SHM_SLOTS - 1) +
+                             PROTO_SHM_SLOT_BYTES);
+    T_CHECK(PROTO_RUN_SORTED_OFFSET >= PROTO_RUN_BASE + PROTO_RUN_HEADER_BYTES);
+    T_CHECK(PROTO_RUN_SORTED_OFFSET % PROTO_SAMPLE_BYTES == 0);
+    T_CHECK(PROTO_RUN_SORTED_OFFSET + PROTO_RUN_SAMPLES * PROTO_SAMPLE_BYTES
+            <= PROTO_SHM_BYTES);
+
+    /* 60 000 samples is what the client can hold, and four blocks of 16 384
+     * cover the recording the service is built for. */
+    T_CHECK_SIZE(PROTO_RUN_SAMPLES, 60000u);
+    T_CHECK(PROTO_RUN_SAMPLES <= PROTO_SHM_SLOTS * PROTO_BLOCK_SAMPLES);
+
+    /* The job id rides in the pulse code: base plus one per block, in range. */
+    T_CHECK(PROTO_PULSE_MAX_JOB >= PROTO_SHM_SLOTS);
+    T_CHECK(PROTO_PULSE_DONE + PROTO_PULSE_MAX_JOB < 128);
+}
+
+/*
+ * A median travels inside a pulse: the float's 32 bits in the value word. The
+ * conversion has to be exact both ways for every pattern, including the ones a
+ * == comparison cannot tell apart.
+ */
+static void test_pulse_payload(void)
+{
+    static const uint32_t patterns[] = {
+        0x00000000u,   /* +0.0              */
+        0x80000000u,   /* -0.0              */
+        0x3f800000u,   /* 1.0               */
+        0xbf800000u,   /* -1.0              */
+        0x00000001u,   /* smallest subnormal */
+        0x00800000u,   /* FLT_MIN           */
+        0x7f7fffffu,   /* FLT_MAX           */
+        0x7fc00000u,   /* a quiet NaN       */
+        0x40490fdbu    /* pi                */
+    };
+    size_t i;
+
+    for (i = 0; i < sizeof(patterns) / sizeof(patterns[0]); i++) {
+        float   value;
+        int32_t word;
+
+        memcpy(&value, &patterns[i], sizeof(value));
+        word = proto_float_to_pulse(value);
+        T_CHECK((uint32_t)word == patterns[i]);        /* bit-exact one way */
+
+        value = proto_pulse_to_float(word);
+        memcpy(&word, &value, sizeof(word));
+        T_CHECK((uint32_t)word == patterns[i]);        /* and back again  */
+    }
+
+    /* A known pattern, and the two zeros staying distinct. */
+    T_CHECK_SIZE(proto_float_to_pulse(1.5f), 0x3fc00000u);
+    T_CHECK(proto_float_to_pulse(0.0f) != proto_float_to_pulse(-0.0f));
+    T_CHECK(proto_pulse_to_float(proto_float_to_pulse(3.25f)) == 3.25f);
 }
 
 /* ------------------------------------------------------------------------- */
@@ -279,8 +351,20 @@ static void test_submit_validation(void)
     desc.max_value    = 12.375f;
 
     proto_submit_prepare(&msg, 7, &desc);
+    T_CHECK_INT(msg.flags, 0);                     /* prepare clears it */
     T_CHECK_INT(proto_submit_valid(&msg), 1);
     T_CHECK_INT(proto_submit_verify(&msg, block), 1);
+
+    /* The one flag this protocol knows: "this is the recording's last block". */
+    msg.flags = PROTO_SUBMIT_LAST;
+    T_CHECK_INT(proto_submit_valid(&msg), 1);
+    T_CHECK_INT(proto_submit_verify(&msg, block), 1);
+
+    /* An unknown bit means the sender expects behaviour this build lacks, so
+     * the submit is refused rather than quietly treated as ordinary. */
+    msg.flags = PROTO_SUBMIT_FLAGS_KNOWN | 0x80000000u;
+    T_CHECK_INT(proto_submit_valid(&msg), 0);
+    msg.flags = 0u;
 
     /* Wrong version. */
     msg.version = (uint16_t)(PROTO_VERSION + 1);
@@ -398,6 +482,8 @@ int main(void)
     T_RUN(test_shm_name);
     T_RUN(test_shm_layout);
     T_RUN(test_result_describes_the_region);
+    T_RUN(test_run_area);
+    T_RUN(test_pulse_payload);
     T_RUN(test_checksum);
     T_RUN(test_submit_prepare_is_deterministic);
     T_RUN(test_submit_validation);

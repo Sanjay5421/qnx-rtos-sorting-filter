@@ -52,6 +52,81 @@ static int find_free(job_entry_t jobs[PROTO_SHM_SLOTS])
     return -1;
 }
 
+/* ------------------------------------------------------------------------- */
+/* The run: the whole recording's global median and sorted array              */
+/* ------------------------------------------------------------------------- */
+
+/*
+ * Behind the four slots the server keeps the recording's global merge, built one
+ * block at a time. It has to be incremental: the client's fetch frees a slot and
+ * the next submit takes the first free one, so by the time the last block
+ * arrives the earlier blocks' arrays may already have been overwritten. Merging
+ * each block as it is processed needs no extra slots and no second sort.
+ *
+ * Static rather than heap buffers, so the failure path stays simple. 480 KiB of
+ * .bss, on a board with 4 GB.
+ */
+static float    run_merged[PROTO_RUN_SAMPLES];
+static float    run_scratch[PROTO_RUN_SAMPLES];
+static size_t   run_samples;
+static unsigned run_jobs;
+static uint64_t run_elapsed_ns;
+
+/* Job ids restart at 1 for every client run, which is where a run begins. */
+static void run_reset(void)
+{
+    run_samples = 0;
+    run_jobs = 0;
+    run_elapsed_ns = 0;
+}
+
+/*
+ * Two-way merge of the sorted run so far and one block's sorted array through
+ * run_scratch, then back into run_merged. Both inputs are ascending, so this is
+ * the merge from milestone 2 -- not a second sort -- and it stays stable because
+ * ties take from the left run.
+ */
+static void run_merge_block(const float *sorted, size_t n)
+{
+    size_t i = 0, j = 0, k = 0;
+
+    while (i < run_samples && j < n)
+        run_scratch[k++] = (run_merged[i] <= sorted[j]) ? run_merged[i++]
+                                                        : sorted[j++];
+    while (i < run_samples) run_scratch[k++] = run_merged[i++];
+    while (j < n)           run_scratch[k++] = sorted[j++];
+
+    memcpy(run_merged, run_scratch, (run_samples + n) * sizeof(float));
+    run_samples += n;
+    run_jobs++;
+}
+
+/*
+ * Publish the run: the globally sorted recording goes into the region, then the
+ * descriptor that points at it and carries the global median. magic is written
+ * last, exactly like a slot's state word, so a client that sees a magic is
+ * looking at a complete descriptor.
+ */
+static void run_publish(shm_region_t *region)
+{
+    unsigned char *base = (unsigned char *)region->base;
+    proto_run_t *run = (proto_run_t *)(void *)(base + PROTO_RUN_BASE);
+    float *dst = (float *)(void *)(base + PROTO_RUN_SORTED_OFFSET);
+
+    memcpy(dst, run_merged, run_samples * sizeof(float));
+
+    run->magic = 0;                       /* hide it while it is being written */
+    run->version = PROTO_RUN_VERSION;
+    run->jobs = run_jobs;
+    run->total_samples = (uint32_t)run_samples;
+    run->global_median = median_of_sorted(run_merged, run_samples);
+    run->sorted_offset = PROTO_RUN_SORTED_OFFSET;
+    run->length = (uint32_t)run_samples;
+    run->sorted_checksum = proto_checksum(dst, run_samples * sizeof(float));
+    run->elapsed_ns = run_elapsed_ns;
+    run->magic = PROTO_RUN_MAGIC;
+}
+
 static int process_submit(shm_region_t *region, mergesort_pool_t *pool,
                           const proto_submit_t *msg, const proto_block_t *block,
                           job_entry_t *job)
@@ -109,7 +184,6 @@ int main(void)
     mergesort_pool_t *pool;
     mergesort_options_t sort_options;
     job_entry_t jobs[PROTO_SHM_SLOTS];
-    int client_coid = -1;
 
     memset(jobs, 0, sizeof(jobs));
     if (shm_region_create(&region) != 0) return EXIT_FAILURE;
@@ -185,6 +259,15 @@ int main(void)
                 (void)MsgReply(rcvid, 0, &ack, sizeof(ack));
                 continue;
             }
+            /* A job id of 1 opens a run: the client numbers its blocks from 1
+             * every time, so this is where the global merge starts over. */
+            if (submit.job_id == 1)
+                run_reset();
+            if (run_samples + submit.desc.samples > PROTO_RUN_SAMPLES) {
+                ack.status = PROTO_ERR_CAPACITY;
+                (void)MsgReply(rcvid, 0, &ack, sizeof(ack));
+                continue;
+            }
             free_index = find_free(jobs);
             if (free_index < 0) {
                 ack.status = PROTO_ERR_BUSY;
@@ -210,21 +293,60 @@ int main(void)
                 jobs[free_index].result.type = PROTO_MSG_RESULT;
                 jobs[free_index].result.status = PROTO_ERR_ARGUMENT;
                 jobs[free_index].result.job_id = submit.job_id;
+            } else {
+                /*
+                 * Fold this block's sorted array into the run now, while its
+                 * slot still holds it: the client's fetch frees the slot and the
+                 * next submit reuses the first free one.
+                 */
+                const float *sorted = (const float *)(const void *)
+                    ((unsigned char *)region.base +
+                     jobs[free_index].result.sorted_offset);
+                uint64_t merge_start = now_ns();
+
+                run_elapsed_ns += jobs[free_index].result.elapsed_ns;
+                run_merge_block(sorted, submit.desc.samples);
+                run_elapsed_ns += now_ns() - merge_start;
+
+                /*
+                 * The recording's last block: the global median is known, so
+                 * publish the run descriptor and the sorted array it points at.
+                 * The pulse below carries that same median.
+                 */
+                if ((submit.flags & PROTO_SUBMIT_LAST) != 0)
+                    run_publish(&region);
             }
 
-            /* Resolve the client for every job. Each run of the client registers
+            /*
+             * Resolve the client for every job: each run of the client registers
              * the same name afresh, so a connection cached from a previous run
-             * is a dead one and its pulse would go nowhere. */
-            client_coid = name_open(CLIENT_NAME, 0);
-            if (client_coid == -1 ||
-                MsgSendPulse(client_coid, SIGEV_PULSE_PRIO_INHERIT,
-                             PROTO_PULSE_DONE, (int)submit.job_id) == -1) {
-                perror("sortmed-server: completion pulse");
-                /* Keep the result fetchable; client can retry the fetch. */
-            }
-            if (client_coid != -1) {
-                name_close(client_coid);
-                client_coid = -1;
+             * is a dead one and its pulse would go nowhere.
+             *
+             * The pulse carries the median itself: the job id in its code and
+             * the float's 32 bits in its value word. Once the run's last block
+             * is done that median is the global one, so the number arrives in
+             * the event and the memory-offset descriptor is waiting, complete,
+             * at PROTO_RUN_BASE.
+             */
+            {
+                float pulse_median = jobs[free_index].result.median;
+                int coid;
+
+                if ((submit.flags & PROTO_SUBMIT_LAST) != 0) {
+                    const proto_run_t *run = (const proto_run_t *)(const void *)
+                        ((const unsigned char *)region.base + PROTO_RUN_BASE);
+                    pulse_median = run->global_median;
+                }
+                coid = name_open(CLIENT_NAME, 0);
+                if (coid == -1 ||
+                    MsgSendPulse(coid, SIGEV_PULSE_PRIO_INHERIT,
+                                 PROTO_PULSE_DONE + (int)submit.job_id,
+                                 proto_float_to_pulse(pulse_median)) == -1) {
+                    perror("sortmed-server: completion pulse");
+                    /* Keep the result fetchable; client can retry the fetch. */
+                }
+                if (coid != -1)
+                    name_close(coid);
             }
         } else if (type == PROTO_MSG_FETCH) {
             proto_fetch_t fetch;
@@ -254,7 +376,6 @@ int main(void)
         }
     }
 
-    if (client_coid != -1) (void)name_close(client_coid);
     name_detach(attach, 0);
     ms_pool_destroy(pool);
     shm_region_close(&region);
