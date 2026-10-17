@@ -162,6 +162,13 @@ flowchart LR
   and the client then listens on its own channel for the tap.
 - **The tap is tiny.** It carries one number — the job id — like a buzzer rather
   than a letter. That is why the client asks for the details afterwards.
+- **The results are left in a shared area of memory.** A sorted block plus a
+  filtered block is 128 KB, and pushing that back through messages would copy it
+  twice for nothing. So the server writes both into one named shared region — the
+  same memory, seen by both programs — and the client reads them there. The reply
+  only says *where*: which region, the two byte offsets, how many values, and a
+  seal per array. That "where" is what the project statement calls the
+  memory-offset descriptor.
 - **The rolling median** is the cleanup step: for each reading, look at a small
   window of neighbours and take the middle value. Readings `5, 5, 5, 50, 5`
   average to 14 — the spike drags the average — but their median is 5, which is
@@ -188,9 +195,9 @@ flowchart LR
   the server *tells* the client, and the client does not sit polling for an
   answer.
 - The answer carries exactly what the project statement promises: the **median**,
-  plus a **memory-offset descriptor** — where the processed results live, how many
-  there are, and a seal over them — along with the window width, the number of
-  outliers removed, and how long the server took.
+  plus a **memory-offset descriptor** — which shared region, at which byte
+  offsets, how many values, and a seal over each of the two arrays — along with
+  the window width, the number of outliers removed, and how long the server took.
 - That last figure, `elapsed_ns`, is what the timing half of the report is built
   from: same work, more workers, less time.
 
@@ -205,7 +212,7 @@ flowchart LR
 | Sort plan with 4 workers | 4 partitions, 2 merge phases, 7 tasks |
 | Time per parcel on the board | 0.757 ms (one worker: 2.278 ms, so 3.01×) |
 | Speed versus the data | 163.84 s of signal sorted in 0.757 ms ≈ 200 000× real time |
-| Tests | 45 tests, 1418 checks on the host; the sort's 578 also pass on the board |
+| Tests | 48 tests, 1473 checks on the host; the sort's 578 also pass on the board |
 | Boot image | 37 610 936 B — seven programs and the data inside one file |
 
 ---

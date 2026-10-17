@@ -20,12 +20,15 @@
  *
  *   3                            <--- MsgReply(ack) --  job id; the client unblocks
  *
- *   4                       (worker threads: parallel merge sort + rolling median)
+ *   4                       (worker threads: parallel merge sort + rolling median,
+ *                            writing the sorted and filtered arrays into the
+ *                            shared region defined below)
  *
  *   5  MsgReceive on its own channel  <-- MsgSendPulse -- (PROTO_PULSE_DONE, job id)
  *
  *   6  MsgSend(fetch, job id)  -------------------->   MsgReply(result)
- *      the result carries the median and the memory-offset descriptor
+ *      the result carries the median; the sorted and filtered arrays wait in
+ *      the shared region it points into, so nothing large crosses twice
  *
  * Step 2 is the IOV transfer: two parts, a fixed header and then the block, so
  * neither side needs one contiguous 64 KiB buffer.
@@ -126,6 +129,108 @@ typedef struct {
 PROTO_STATIC_ASSERT(sizeof(proto_block_t) == PROTO_BLOCK_BYTES, block_is_64_kib);
 
 /* ------------------------------------------------------------------------- */
+/* Where the results live: one named shared region                            */
+/* ------------------------------------------------------------------------- */
+
+/*
+ * Blocks arrive by message; results do not travel back the same way. The server
+ * writes the sorted block and the filtered block into a single named shared
+ * memory object -- 128 KiB that the client reads in place, instead of two more
+ * copies per round trip. The result message stays small: the median, and the
+ * byte offsets that say where in the region to look.
+ *
+ * The block itself still crosses as an IOV message part (submit header + block),
+ * so "at least one IOV transfer" and "64 KB payload" are untouched: this region
+ * changes where the data is unpacked, not how it arrives.
+ *
+ * Layout: one region header, then PROTO_SHM_SLOTS slots of PROTO_SHM_SLOT_BYTES.
+ *
+ *     proto_shm_header_t
+ *     slot 0:  proto_shm_slot_t | sorted[PROTO_BLOCK_SAMPLES] | filtered[...]
+ *     slot 1:  proto_shm_slot_t | sorted[PROTO_BLOCK_SAMPLES] | filtered[...]
+ *     ...
+ *
+ * On QNX a name that begins with '/' becomes /dev/shmem/<name>; a name without
+ * the leading slash would land under the *server's current directory* instead,
+ * so the slash is part of the convention rather than decoration (shm_open(2)).
+ *
+ * Ownership. The server creates the object (shm_open, ftruncate, mmap) before it
+ * attaches its service name, so a client that can reach the service can also map
+ * the region; the client maps it read-only and never writes. The object outlives
+ * the process that made it unless it is unlinked, so the server unlinks and
+ * recreates it at startup and the header carries a magic word, a version and a
+ * generation counter -- a stale or foreign object is then rejected instead of
+ * read. Which slot a job lands in is the server's business and appears in no
+ * message: a result quotes absolute offsets from the start of the region.
+ * One client at a time is assumed, as the project has one; the slot count is
+ * what bounds how many finished results may be waiting to be collected.
+ */
+
+/*: Name of the region. Leading '/' => /dev/shmem/sortmed-results. */
+#define PROTO_SHM_NAME   "/sortmed-results"
+
+/*: Slots, i.e. how many jobs may hold a result at once. A submit that arrives
+ *  when none is free is refused with PROTO_ERR_BUSY rather than overwriting a
+ *  result the client has not read yet. */
+#define PROTO_SHM_SLOTS  4u
+
+/*: Bytes per float32 sample. Every offset in the region is a multiple of it. */
+#define PROTO_SAMPLE_BYTES 4u
+
+/*: Stamped into the region so that a mapping to a stale or foreign object is
+ *  caught rather than read. "SMDR". */
+#define PROTO_SHM_MAGIC   0x534d4452u
+
+/*: Tied to PROTO_VERSION: the layout below cannot change without it. */
+#define PROTO_SHM_VERSION PROTO_VERSION
+
+/*
+ * Region header: the first bytes of the mapping, validated before any offset
+ * from a result message is trusted.
+ */
+typedef struct {
+    uint32_t magic;        /* PROTO_SHM_MAGIC                                */
+    uint32_t version;      /* PROTO_SHM_VERSION                              */
+    uint32_t slots;        /* PROTO_SHM_SLOTS                                */
+    uint32_t slot_bytes;   /* PROTO_SHM_SLOT_BYTES                           */
+    uint64_t generation;   /* bumped by every server start, so a client that
+                            * still holds an older mapping can notice         */
+} proto_shm_header_t;
+
+/*: Slot state word. Only WRITTEN means the arrays below hold a finished result. */
+#define PROTO_SLOT_FREE    0u
+#define PROTO_SLOT_WRITTEN 0x57325244u   /* "WR2D" */
+
+/*
+ * Start of every slot. The client reads this after being told that a result
+ * exists and compares job_id with the result it is collecting: a mismatch means
+ * the slot has been reused for a newer job, and the arrays must not be trusted.
+ */
+typedef struct {
+    uint32_t job_id;       /* the job whose result is in this slot           */
+    uint32_t length;       /* float32 values written to each array below      */
+    uint32_t state;        /* PROTO_SLOT_FREE or PROTO_SLOT_WRITTEN          */
+    uint32_t reserved;     /* 0; keeps the header exactly 16 bytes           */
+} proto_shm_slot_t;
+
+#define PROTO_SHM_HEADER_BYTES      ((uint32_t)sizeof(proto_shm_header_t))
+#define PROTO_SHM_SLOT_HEADER_BYTES ((uint32_t)sizeof(proto_shm_slot_t))
+#define PROTO_SHM_SLOT_BYTES        (PROTO_SHM_SLOT_HEADER_BYTES + 2u * PROTO_BLOCK_BYTES)
+#define PROTO_SHM_BYTES             (PROTO_SHM_HEADER_BYTES + PROTO_SHM_SLOTS * PROTO_SHM_SLOT_BYTES)
+
+/*: Byte offsets, from the start of the region, of a slot and of the two arrays
+ *  inside it. No valid offset is 0, which is how a result says "not produced". */
+#define PROTO_SHM_SLOT_BASE(i)       (PROTO_SHM_HEADER_BYTES + (i) * PROTO_SHM_SLOT_BYTES)
+#define PROTO_SHM_SORTED_OFFSET(i)   (PROTO_SHM_SLOT_BASE(i) + PROTO_SHM_SLOT_HEADER_BYTES)
+#define PROTO_SHM_FILTERED_OFFSET(i) (PROTO_SHM_SORTED_OFFSET(i) + PROTO_BLOCK_BYTES)
+
+/* Both headers are read straight out of the mapping, so they must not grow
+ * padding; and every offset a result can legitimately carry is non-zero. */
+PROTO_STATIC_ASSERT(sizeof(proto_shm_header_t) == 24, shm_header_is_24_bytes);
+PROTO_STATIC_ASSERT(sizeof(proto_shm_slot_t) == 16, shm_slot_header_is_16_bytes);
+PROTO_STATIC_ASSERT(PROTO_SHM_SORTED_OFFSET(0) != 0, shm_offsets_are_nonzero);
+
+/* ------------------------------------------------------------------------- */
 /* Channels                                                                   */
 /* ------------------------------------------------------------------------- */
 
@@ -216,10 +321,15 @@ typedef struct {
 } proto_fetch_t;
 
 /*
- * The result. `median` is the filtered value the service computed, and
- * `offset`/`length`/`checksum` are the memory-offset descriptor: where the
- * service put the processed samples, how many there are, and how to tell they
- * arrived intact.
+ * The result. `median` is the filtered value the service computed. The two
+ * offsets are byte offsets from the start of the shared region above --
+ * `sorted_offset` for the sorted block, `filtered_offset` for the filtered one
+ * -- and `length` is how many float32 values each of them holds. An offset of 0
+ * means that array was not produced: no valid offset is 0, because the region
+ * begins with its header.
+ *
+ * Each checksum is FNV-1a over the array it names, so the client can prove that
+ * what it reads out of shared memory is what the server wrote there.
  */
 typedef struct {
     uint16_t type;             /* PROTO_MSG_RESULT                            */
@@ -228,9 +338,11 @@ typedef struct {
     float    median;           /* calculated median                           */
     uint32_t filter_width;     /* samples in the rolling window               */
     uint32_t outliers_removed; /* samples the filter rejected                 */
-    uint32_t offset;           /* memory-offset descriptor: start of results  */
-    uint32_t length;           /* float32 values available at that offset     */
-    uint32_t checksum;         /* FNV-1a 32 over those values                 */
+    uint32_t sorted_offset;    /* bytes from the region start; 0 = absent     */
+    uint32_t filtered_offset;  /* bytes from the region start; 0 = absent     */
+    uint32_t length;           /* float32 values at each of those offsets     */
+    uint32_t sorted_checksum;  /* FNV-1a 32 over the sorted array             */
+    uint32_t filtered_checksum;/* FNV-1a 32 over the filtered array           */
     uint64_t elapsed_ns;       /* server-side processing time                 */
 } proto_result_t;
 

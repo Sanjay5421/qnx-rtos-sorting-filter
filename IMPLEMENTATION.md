@@ -215,14 +215,24 @@ message flow as a diagram.
     failures; the reply status says *why* a job was refused (`PROTO_ERR_CHECKSUM`,
     `PROTO_ERR_VERSION`, …) and `proto_status_str()` turns it into a sentence for
     the log.
+11. **Results come back through shared memory, not through a reply.** A sorted
+    block and a filtered block are 128 KiB between them, and copying that back as
+    a message would move it twice for no reason. So the header also defines one
+    named region — `PROTO_SHM_NAME`, `/dev/shmem/sortmed-results` — with a fixed
+    layout: a header carrying magic, version and a generation counter, then four
+    slots of a slot header plus a sorted array and a filtered array. The result
+    message carries byte offsets into that region instead of data, while the
+    *block* still crosses by message, so the IOV and 64 KB properties are
+    untouched. On QNX a leading `/` puts the object in `/dev/shmem`, and the
+    library is plain libc — no extra library in either Makefile.
 
 **Validation the server will run is already implemented and tested**:
 `proto_block_desc_valid()` for the descriptor, `proto_submit_valid()` for type,
 version and descriptor, and `proto_submit_verify()` for "does the block match the
-checksum the descriptor claims". `test_protocol.c` (9 tests, 82 checks) pins the
+checksum the descriptor claims". `test_protocol.c` (12 tests, 137 checks) pins the
 64 KiB size, the type and pulse ranges, the first-field layout of every message,
-the checksum definition and its sensitivity, byte-determinism of `prepare`, and
-each refusal path.
+the shared region's name and slot layout, the checksum definition and its
+sensitivity, byte-determinism of `prepare`, and each refusal path.
 
 ---
 
@@ -243,9 +253,10 @@ sequenceDiagram
     S->>S: validate descriptor, verify FNV-1a, queue the job
     S-->>C: MsgReply(ack, job_id)
     S->>S: worker pool — merge sort, then rolling median
+    Note over S: both arrays written into the shared region
     S-->>C: MsgSendPulse(PROTO_PULSE_DONE, job_id)
     C->>S: MsgSend(fetch, job_id)
-    S-->>C: MsgReply(result — median + memory-offset descriptor)
+    S-->>C: MsgReply(result — median + byte offsets into the region)
 ```
 
 **What already exists for it.** The whole right-hand side of stages 4 and 5 in the
@@ -263,8 +274,12 @@ produce exactly what the submit message wants.
   and checked. A refusal (`PROTO_ERR_*`) is a message and a retry, never a silent
   skip.
 - `MsgReceive()` on the client's own connection for the pulse, then
-  `MsgSend(fetch)` and the result: the median, the memory-offset descriptor and
+  `MsgSend(fetch)` and the result: the median, the two region offsets and
   `elapsed_ns` printed per block, plus a running total.
+- Mapping the results region once the service answers: `shm_open(PROTO_SHM_NAME,
+  O_RDONLY)` and `mmap`, check the header's magic and version, then read each
+  result at the offsets it names — checking the slot's `job_id` against the
+  result's, and the array's checksum over the bytes read, before trusting them.
 - Error paths as first-class output: no server within the deadline, a refused
   block, a pulse that never arrives (a receive timeout), and a short final block.
 
@@ -286,9 +301,11 @@ in stage 5.
   against the block. Only then is the ack replied, and only then does the job join
   the work queue.
 - The receive loop must never block on the sort, or the next submit would wait
-  behind it. The job carries its own block buffer and its own time-ordered copy
-  (the copy the median filter needs, and the reason the arriving block is never
-  sorted in place — its checksum describes it as it arrived).
+  behind it. A job owns a slot in the shared region: the block is received
+  straight into it, and the rolling filter reads a time-ordered copy taken before
+  the sort — sorting destroys the order the filter needs. A submit that arrives
+  with every slot taken is refused with `PROTO_ERR_BUSY` rather than overwriting a
+  result the client has not collected yet.
 - The completion pulse goes to the connection the client supplied, so the server
   keeps a per-job `rcvid`/connection id next to the job, and `PROTO_MSG_FETCH`
   answers with `proto_result_t`.
@@ -417,18 +434,20 @@ the project statement asks for.
   point 6).
 - **The fetch.** `PROTO_MSG_FETCH` asks for the job's `proto_result_t`, because a
   pulse can carry one machine word and the result needs a median, a window width,
-  an outlier count, an offset, a length, a checksum and a duration.
-- **The memory-offset descriptor** is `offset` / `length` / `checksum`: where the
-  processed samples live in the server's result buffer, how many there are, and
-  how the client can tell they arrived intact. A matching checksum over the same
-  FNV-1a definition the block used means the client can compare what it fetched
-  against what the server computed.
+  an outlier count, two region offsets, a length, two checksums and a duration.
+- **The memory-offset descriptor is the region plus two offsets.**
+  `sorted_offset` and `filtered_offset` are byte positions from the start of the
+  shared region, `length` is how many float32 values each array holds, and each
+  array carries its own FNV-1a checksum — offset 0 meaning "not produced". A
+  matching checksum is what lets the client prove the bytes it read out of shared
+  memory are the bytes the server wrote, which is the integrity the kernel would
+  otherwise have provided by copying the data back in a message.
 - **`elapsed_ns`** is the server-side processing time, which is what the M4 timing
   study compares across runs, thread counts and block sizes.
 
 **What M4 adds:** the wiring in both programs, a repeated-request run to show the
 pulse arriving per job and pairing correctly with its job id, and the validation
-of the returned median and offset against the host.
+of the returned median and of the arrays at the returned offsets against the host.
 
 ---
 
@@ -488,8 +507,8 @@ flowchart LR
 
 | Quantity | Value |
 | --- | --- |
-| Host test result | 1418 checks, 0 failed, 0 skipped (642 + 82 + 116 + 578) |
-| Board test result | `test_protocol` 82, `test_block_loader` 116, `test_mergesort` 578 — 0 failed, 0 skipped each |
+| Host test result | 1473 checks, 0 failed, 0 skipped (642 + 137 + 116 + 578) |
+| Board test result | `test_protocol` 82 (the image at the time; the suite is now 137), `test_block_loader` 116, `test_mergesort` 578 — 0 failed, 0 skipped each |
 | Block size | 16384 samples = 65536 B |
 | 60 000-sample recording | 3 full blocks + 10 848 samples |
 | Payload bytes as blocks | 262 144 B (4 × 65 536) |
