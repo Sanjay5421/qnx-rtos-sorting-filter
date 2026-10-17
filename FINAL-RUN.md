@@ -248,6 +248,20 @@ definition (`median_of_sorted`: the mean of the two middle values for an
 even-sized block), which is why `truth_columns.png` reproduces `medians.csv` to
 the last digit.
 
+What those figures showed for this run:
+
+| Channel | RMSE gain (before → after) | Samples closer to the truth | Samples changed |
+| --- | --- | --- | --- |
+| voltage | 6.17× (23.99 → 3.89 mV; p99 43.96 → 5.28 mV) | 1464 of 60 000 | 1502 |
+| current | 10.79× | 1514 of 60 000 | 1548 |
+| temperature | 2.00× | 1458 of 60 000 | 1488 |
+| time | already exact — 0 error before and after | 0 | 0 |
+
+`raw.bin` for every channel is the dataset's column bit for bit, and `sorted.bin`
+is an exact permutation of it, so the only samples that move are the replaced ones.
+`time` is the control: nothing was injected there and the filter left it
+byte-identical.
+
 ## 5. Board: the module suites (optional)
 
 Run from `/tmp` as well; the payload argument is the `/data` directory. The first
@@ -302,6 +316,15 @@ test_protocol             # the message definition
   the whole recording so the block seams have context.
 - **Write-back**: the completed run on disk — raw, sorted, filtered and the
   per-block medians.
+- **All four channels**, one run each, with no server restart in between; the fix
+  that made that possible is that the server resolves the client's connection per
+  job instead of caching the first one.
+- **The filter's effect, measured**: 6.17× / 10.79× / 2.00× RMSE gains against the
+  dataset's clean signal on voltage / current / temperature, and a clean channel
+  left byte-identical (section 4b).
+- **The thread picture**: four sort workers created once per process, one server
+  dispatcher, one client thread, and a single-threaded rolling filter — about six
+  threads of ours in flight on four cores.
 
 ---
 
