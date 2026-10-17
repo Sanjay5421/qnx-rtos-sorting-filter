@@ -388,10 +388,12 @@ check that 1, 2, 3, 5 and 8 workers produce byte-identical output.
 | 2 | 2 partitions, 1 merge phase, 3 tasks | 1.253 ms |
 | 4 | 4 partitions, 2 merge phases, 7 tasks | 0.757 ms |
 
-1 → 4 workers is **3.01×** on the board. One block is 163.84 s of the 100 Hz
-signal, and it is sorted in 0.757 ms — about **200 000 times faster than the data
-arrives**. The millisecond figures wobble between runs; the *plan line* is the
-deterministic proof that the parallel path ran, because 1 partition / 0 phases
+1 → 4 workers is **3.01×** on the board. One block is 163.84 s of signal at the
+100 Hz design rate, and it is sorted in 0.757 ms — about **200 000 times faster
+than the data arrives** at that rate. The generated recording samples the solver
+unevenly, ~74.8 ms per sample (13.36 Hz), so a block is 1226 s of *that* stream
+and the headroom is larger still. The millisecond figures wobble between runs; the
+*plan line* is the deterministic proof that the parallel path ran, because 1 partition / 0 phases
 cannot come out of a four-worker merge.
 
 ### How the sort is tested (`tests/test_mergesort.c`, 13 tests / 578 checks)
