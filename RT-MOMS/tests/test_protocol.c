@@ -88,6 +88,97 @@ static void test_field_layout(void)
     T_CHECK_SIZE(sizeof(((proto_result_t *)0)->elapsed_ns), 8);
 }
 
+static void test_shm_name(void)
+{
+    const char *name = PROTO_SHM_NAME;
+    size_t      len  = strlen(name);
+
+    /*
+     * shm_open() maps a leading '/' to /dev/shmem/<name>; without it the object
+     * would be created under the server's current directory, where the client
+     * would never find it. Exactly one slash: a second one names a directory.
+     */
+    T_CHECK(len >= 2);
+    T_CHECK(name[0] == '/');
+    T_CHECK(strchr(name + 1, '/') == NULL);
+
+    /* Nothing that needs quoting, and short enough to sit comfortably in the
+     * /dev/shmem namespace (only PATH_MAX is enforced there). */
+    T_CHECK(strpbrk(name, " \t\r\n") == NULL);
+    T_CHECK(len < 64);
+}
+
+static void test_shm_layout(void)
+{
+    unsigned i;
+
+    /* Fixed-size headers: both are read straight out of the mapping. */
+    T_CHECK_SIZE(sizeof(proto_shm_header_t), 24);
+    T_CHECK_SIZE(sizeof(proto_shm_slot_t), 16);
+    T_CHECK_SIZE(PROTO_SHM_HEADER_BYTES, 24);
+    T_CHECK_SIZE(PROTO_SHM_SLOT_HEADER_BYTES, 16);
+
+    /* A slot is its header plus two full blocks: the sorted one and the
+     * filtered one. */
+    T_CHECK_SIZE(PROTO_SHM_SLOT_BYTES, 16 + 2 * 65536);
+    T_CHECK_SIZE(PROTO_SHM_BYTES, 24 + PROTO_SHM_SLOTS * PROTO_SHM_SLOT_BYTES);
+    T_CHECK_INT(PROTO_SHM_SLOTS, 4);
+
+    /* The magic, the version and the state word are what tell a live region
+     * from a stale one. */
+    T_CHECK(PROTO_SHM_MAGIC != 0);
+    T_CHECK(PROTO_SHM_MAGIC != PROTO_SLOT_FREE);
+    T_CHECK(PROTO_SHM_MAGIC != PROTO_SLOT_WRITTEN);
+    T_CHECK_SIZE(PROTO_SHM_VERSION, PROTO_VERSION);
+    T_CHECK(PROTO_SLOT_FREE != PROTO_SLOT_WRITTEN);
+
+    /*
+     * Every slot's two arrays sit inside their own slot, stay aligned to the
+     * sample size, and are reached by offsets that are never 0 -- 0 is how a
+     * result says "this array was not produced".
+     */
+    for (i = 0; i < PROTO_SHM_SLOTS; i++) {
+        uint32_t slot     = PROTO_SHM_SLOT_BASE(i);
+        uint32_t sorted   = PROTO_SHM_SORTED_OFFSET(i);
+        uint32_t filtered = PROTO_SHM_FILTERED_OFFSET(i);
+
+        T_CHECK(slot >= PROTO_SHM_HEADER_BYTES);
+        T_CHECK(sorted != 0 && filtered != 0);
+        T_CHECK(sorted % PROTO_SAMPLE_BYTES == 0);
+        T_CHECK(filtered % PROTO_SAMPLE_BYTES == 0);
+        T_CHECK(sorted >= slot + PROTO_SHM_SLOT_HEADER_BYTES);
+        T_CHECK(filtered == sorted + PROTO_BLOCK_BYTES);
+        T_CHECK(filtered + PROTO_BLOCK_SAMPLES * PROTO_SAMPLE_BYTES
+                <= PROTO_SHM_BYTES);
+    }
+
+    /* Slots do not overlap, and the last one ends inside the region. */
+    T_CHECK(PROTO_SHM_SLOT_BASE(1) >=
+            PROTO_SHM_SLOT_BASE(0) + PROTO_SHM_SLOT_BYTES);
+    T_CHECK(PROTO_SHM_SLOT_BASE(PROTO_SHM_SLOTS - 1) + PROTO_SHM_SLOT_BYTES
+            <= PROTO_SHM_BYTES);
+
+    /* The whole region fits the 32-bit offsets a result carries. */
+    T_CHECK(PROTO_SHM_BYTES <= 0xFFFFFFFFu);
+}
+
+static void test_result_describes_the_region(void)
+{
+    /* 32-bit offsets, lengths and checksums: one region is far smaller than
+     * 4 GiB, so a 32-bit field is enough and cannot be mistaken for a count of
+     * something else. */
+    T_CHECK_SIZE(sizeof(((proto_result_t *)0)->sorted_offset), 4);
+    T_CHECK_SIZE(sizeof(((proto_result_t *)0)->filtered_offset), 4);
+    T_CHECK_SIZE(sizeof(((proto_result_t *)0)->length), 4);
+    T_CHECK_SIZE(sizeof(((proto_result_t *)0)->sorted_checksum), 4);
+    T_CHECK_SIZE(sizeof(((proto_result_t *)0)->filtered_checksum), 4);
+
+    /* A result may say "not produced" (offset 0), but byte 0 of the region is
+     * its header, so no real array ever starts there. */
+    T_CHECK(PROTO_SHM_SORTED_OFFSET(0) != 0);
+    T_CHECK(PROTO_SHM_FILTERED_OFFSET(0) != 0);
+}
+
 /* ------------------------------------------------------------------------- */
 
 static void test_checksum(void)
@@ -304,6 +395,9 @@ int main(void)
     T_RUN(test_message_types);
     T_RUN(test_pulse_code);
     T_RUN(test_field_layout);
+    T_RUN(test_shm_name);
+    T_RUN(test_shm_layout);
+    T_RUN(test_result_describes_the_region);
     T_RUN(test_checksum);
     T_RUN(test_submit_prepare_is_deterministic);
     T_RUN(test_submit_validation);

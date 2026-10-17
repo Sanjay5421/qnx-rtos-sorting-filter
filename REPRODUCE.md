@@ -38,7 +38,7 @@ Expected tail of each block, and exit status 0 only if nothing failed:
 
 ```
 === test_sensor            642 checks, 0 failed, 0 skipped
-=== test_protocol           82 checks, 0 failed, 0 skipped
+=== test_protocol          137 checks, 0 failed, 0 skipped
 === test_block_loader      116 checks, 0 failed, 0 skipped
 === test_mergesort         578 checks, 0 failed, 0 skipped
 ```
@@ -268,7 +268,7 @@ failed, 1 skipped` instead of `578 checks, 0 failed, 0 skipped`.
 
 | Command | Target | Host |
 | --- | --- | --- |
-| `test_protocol` | `82 checks, 0 failed, 0 skipped` | same |
+| `test_protocol` | `137 checks, 0 failed, 0 skipped` | same |
 | `test_sensor /data` | `642 checks, 0 failed, 0 skipped` | same |
 | `test_block_loader /data` | `116 checks, 0 failed, 0 skipped` | same |
 | `test_mergesort /data` | `578 checks, 0 failed, 0 skipped` | same |
@@ -313,12 +313,13 @@ and stride, float handling and the checksum — is bit-identical on aarch64. The
 `cksum` values are POSIX CRCs of the payload files and owe nothing to our code:
 they show the data inside the image is the original file.
 
-Confirmed on hardware: `test_protocol` (82 / 0 failed / 0 skipped),
-`test_block_loader /data` (116 / 0 / 0), `test_mergesort /data` (578 / 0 / 0, the
-payload tests included), both `cksum` values, `sensor_demo`, `loader_demo` in both
-layouts, and `pipeline_demo` at 1, 2 and 4 workers on both layouts — medians,
-ranges, plan lines and order verdicts identical to the host, and the planar and
-interleaved routes producing the same four checksums.
+Confirmed on hardware: `test_protocol` (82 / 0 failed / 0 skipped on the image of
+the time — 137 now that the shared-region checks are in), `test_block_loader /data`
+(116 / 0 / 0), `test_mergesort /data` (578 / 0 / 0, the payload tests included),
+both `cksum` values, `sensor_demo`, `loader_demo` in both layouts, and
+`pipeline_demo` at 1, 2 and 4 workers on both layouts — medians, ranges, plan
+lines and order verdicts identical to the host, and the planar and interleaved
+routes producing the same four checksums.
 
 Still to capture on the board: `test_sensor /data` past `test_real_block_partition`
 — the two tests after it and the `642 checks, 0 failed, 0 skipped` line. An earlier
@@ -401,7 +402,7 @@ inside it. Copy it to the SD card's FAT partition with the firmware files and a
 Then, on the target console and with nothing to mount:
 
 ```sh
-test_protocol                 # expected:  82 checks, 0 failed, 0 skipped
+test_protocol                 # expected: 137 checks, 0 failed, 0 skipped
 test_sensor /data             # expected: 642 checks, 0 failed, 0 skipped
 test_block_loader /data       # expected: 116 checks, 0 failed, 0 skipped
 test_mergesort /data          # expected: 578 checks, 0 failed, 0 skipped

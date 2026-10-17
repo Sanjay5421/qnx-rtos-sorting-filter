@@ -48,6 +48,34 @@ visibly different.
 | Corrupted samples — temperature | 2 680 (1.4889 %) |
 | Corrupted samples — total | 8 040 of 540 000 sensor cells (1.489 %) |
 
+## [Unreleased] — 2026-10-17
+
+### Changed
+
+- **Results now travel through a shared region instead of a reply.** The client
+  still sends `{header, 64 KiB block}` as a two-part IOV — the block crosses by
+  message, so the IOV and the 64 KB payload properties of the design stand — but
+  the server unpacks each block into a named `/dev/shmem` region and leaves the
+  sorted and filtered arrays there, instead of copying 128 KiB back through the
+  kernel. The result message now carries byte offsets into that region.
+- **`protocol.h` defines the region**: `PROTO_SHM_NAME`
+  (`/dev/shmem/sortmed-results`), a header carrying magic, version, slot count,
+  slot size and a generation counter, then four slots of a slot header plus a
+  sorted and a filtered array of `PROTO_BLOCK_SAMPLES` each, with the offsets of
+  everything in it. The leading `/` is what puts the object in `/dev/shmem`
+  rather than under the server's working directory, and `shm_open` needs nothing
+  beyond libc in either Makefile.
+- **`proto_result_t` describes that region**: `offset` became `sorted_offset`
+  plus `filtered_offset`, both byte offsets from the region start where 0 means
+  "not produced", and each array carries its own checksum so the client verifies
+  what it reads instead of trusting memory. `PROTO_ERR_BUSY` acquired a job: a
+  submit that finds every slot taken is refused rather than overwriting a result
+  nobody has collected yet.
+- **`test_protocol.c` grew three tests** — 9 → 12 tests, 82 → 137 checks — for the
+  region's name rules, the layout arithmetic, the offset alignment and a
+  full-length result fitting in the last slot. The host suite is 1473 checks, all
+  passing, and the header still cross-compiles for `aarch64le` with no warnings.
+
 ## [Unreleased] — 2026-10-15
 
 The QNX side of the project (`RT-MOMS/`) landed in this window without an entry
