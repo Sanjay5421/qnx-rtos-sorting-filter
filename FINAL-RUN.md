@@ -5,10 +5,19 @@ recording in 64 KiB blocks, the server sorts and filters each one, taps the clie
 with a pulse, and the client collects the median and the arrays out of the shared
 region — then writes the completed run back to disk.
 
-**Status.** Both programs build for `aarch64le` with no warnings, both are inside
-the image, and the host suite is green (9037 checks, 0 failed). **This run has not
-been executed on hardware yet** — it is the next thing to do. Section 6 lists what
-to look at if it misbehaves.
+**Status — executed on hardware, 2026-10-17.** The service ran end to end on the
+board: four blocks accepted, four completions, four results read out of the shared
+region and checksum-verified, and the write-back line printed. The four block
+medians were `3.961808`, `3.641635`, `3.384104`, `2.973536` — exactly the numbers
+`pipeline_demo` produces — with `431 / 382 / 406 / 283` outliers per block, a global
+median of `3.56619358` and `1502` outliers over the recording. The server measured
+`7.51 / 7.32 / 7.30 / 5.01 ms` per block for sort + filter + checksums (the sort
+itself is 0.757 ms of that; the rolling filter dominates).
+
+One thing to know before relying on the outputs: they are written into `/tmp`,
+which on this image is `/dev/shmem` — **RAM** — so they do not survive a power-off.
+Section 3 shows how to keep them on the SD card. Section 6 lists what to look at
+if the run misbehaves.
 
 | Step | Where | What happens |
 | --- | --- | --- |
@@ -94,6 +103,56 @@ the same element of the same sorted block. `outliers=` is what the rolling Hampe
 filter (width 9, threshold 4 σ) rejected in that block; `elapsed=` is the server's
 own processing time for it.
 
+### Getting the files onto your PC: `/tmp` is RAM
+
+On this image `/tmp` is `/dev/shmem` — memory. The four files therefore live only
+until the board loses power, and the SD card's FAT partition is the only road to
+your PC (the console is the interface, and ssh is not usable in this image).
+
+**If the board is still running**, the files are still there. Mount the card and
+copy them:
+
+```sh
+mkdir -p /tmp/mnt                  # / is read-only; a directory in RAM is a fine mount point
+ls /dev/sd*                        # the card: /dev/sd0, first partition /dev/sd0t1
+mount -t dos /dev/sd0t1 /tmp/mnt   # use the partition the listing actually showed
+cp raw.bin filtered.bin sorted.bin medians.csv /tmp/mnt/
+sync
+umount /tmp/mnt
+```
+
+Then `shutdown`, pull the card, and plug it into the PC: the four files are in the
+card's FAT partition (the drive letter Windows gives it), next to
+`ifs-rpi4.bin` and `config.txt`.
+
+**If the board was already switched off**, the files are gone and the run has to be
+repeated. Run the client *from the mounted card* so it writes straight there:
+
+```sh
+cd /tmp
+sortmed-server &
+waitfor /dev/shmem/sortmed-results
+mkdir -p /tmp/mnt
+mount -t dos /dev/sd0t1 /tmp/mnt
+cd /tmp/mnt
+sortmed-client /data/bin/Chen2020_c1_T25_discharge.bin interleaved voltage 100
+sync ; cd / ; umount /tmp/mnt
+```
+
+Notes that matter:
+
+- **The device name**: `ls /dev/sd*` first. The Pi's FAT boot partition is usually
+  `/dev/sd0t1`; if the card has no partition table the whole disk is `/dev/sd0`.
+  Mount whichever exists.
+- **`sync` then `umount`** before pulling the card — that flushes the FAT. Unplugging
+  while it is mounted loses the writes, or worse, damages the filesystem.
+- **Mounting is safe while the system runs**: the image is loaded into RAM at boot,
+  so nothing on the board is using the card.
+- `/tmp/mnt` is just a mount point; the card's contents appear under it, and `/tmp`
+  itself still behaves as a RAM disk.
+- The files are 240 000 B each (three of them) plus a 152-byte CSV — no room
+  problem on the card.
+
 ## 4. Board: verify the result
 
 ```sh
@@ -143,6 +202,7 @@ test_protocol             # the message definition
 
 | Symptom | Cause, and what to do |
 | --- | --- |
+| The output files are missing after a power cycle | They were written into `/tmp`, which is memory on this image. Section 3 mounts the SD card and copies them (or runs the client there) |
 | `client: name_open server (start server first)` | The server was not up yet. Start it (section 2) and re-run the client — it makes a single connection attempt, it does not retry |
 | `client: submit … rejected: …` | The server refused the block: `checksum` = it arrived damaged, `version` = the two sides disagree, `busy` = all four result slots are taken, `argument` = malformed header |
 | `client: shared-memory checksum mismatch` | The arrays changed between the server writing them and the client reading them — treat the run as invalid and run it again |
