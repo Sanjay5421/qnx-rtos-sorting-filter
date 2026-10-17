@@ -56,3 +56,7 @@ data/artifacts/dataset/
 /RT-MOMS/app/sortmed-server
 /RT-MOMS/app/sortmed-client
 /RT-MOMS/app/*.o
+
+# Figures produced from a board run by tools/plot_run.py — regenerable from the
+# run's output files, so they are not part of the deliverable.
+/run-figures/
