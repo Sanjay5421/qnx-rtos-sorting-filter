@@ -100,6 +100,29 @@ visibly different.
   board's `medians.csv` from the dataset now reproduces it exactly:
   3.961808 / 3.641635 / 3.384104 / 2.973536 V.
 
+### Added
+
+- **The pulse carries the calculated median, and the server computes the global
+  one.** `PROTO_VERSION` is 2: `proto_submit_t` gained `flags`, whose
+  `PROTO_SUBMIT_LAST` bit marks the recording's final block. The server folds
+  each block's sorted array into a run merge as the block is processed —
+  incrementally, because a slot's arrays may be overwritten as soon as the client
+  has fetched them — and when the final block completes it publishes a
+  `proto_run_t` at `PROTO_RUN_BASE` in the shared region: the global median, the
+  byte offset of the globally sorted recording, its length and its checksum. The
+  completing pulse then carries the median itself, with the job id in its code
+  (`PROTO_PULSE_DONE + job_id`) and the float's 32 bits in its value word. The
+  client prints every pulse, validates the run descriptor and the array checksum,
+  and cross-checks the server's global median against the one it computes itself,
+  bit for bit. The region grew from 524 376 B to 764 416 B to hold the run and its
+  sorted array.
+- **`test_kpi`** — the speed half of the report in one short program: a block
+  sorted at 1, 2 and 4 workers with identical medians every time, the rolling
+  filter's cost and its spike count, the global merge checked against `qsort`,
+  and the two routes to the global median compared bit for bit. Host result: 79
+  checks, 0 failures; 0.872 / 0.515 / 0.334 ms per block at 1 / 2 / 4 workers
+  (2.61×), filter 0.59 ms, global merge 0.53 ms at 472 MiB/s.
+
 ## [Unreleased] — 2026-10-15
 
 The QNX side of the project (`RT-MOMS/`) landed in this window without an entry

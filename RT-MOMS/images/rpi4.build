@@ -173,6 +173,7 @@
 /bin/test_mergesort=test_mergesort
 /bin/test_median=test_median
 /bin/test_shared_memory=test_shared_memory
+/bin/test_kpi=test_kpi
 /bin/loader_demo=loader_demo
 /bin/sensor_demo=sensor_demo
 /bin/pipeline_demo=pipeline_demo

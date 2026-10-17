@@ -39,11 +39,11 @@ THREAD_SOURCES = $(SOURCES) $(APP)/mergesort.c
 HEADERS        = $(APP)/sensor.h $(APP)/protocol.h $(APP)/block_loader.h \
                  $(APP)/mergesort.h $(APP)/median.h $(APP)/shared_memory.h
 
-TESTS    = test_sensor test_protocol test_block_loader test_mergesort test_median test_shared_memory
+TESTS    = test_sensor test_protocol test_block_loader test_mergesort test_median test_shared_memory test_kpi
 DEMOS    = sensor_demo loader_demo pipeline_demo
 PLAIN    = test_sensor test_protocol test_block_loader test_median test_shared_memory sensor_demo \
            loader_demo
-THREADED = test_mergesort pipeline_demo
+THREADED = test_mergesort test_kpi pipeline_demo
 
 # Windows needs the extension on the binary it has just produced.
 EXE := $(if $(filter Windows_NT,$(OS)),.exe,)

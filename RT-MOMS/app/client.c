@@ -109,7 +109,14 @@ static int find_slot_for_offset(uint32_t sorted_offset, unsigned *slot_out)
     return -1;
 }
 
-static int wait_for_done(name_attach_t *attach, uint32_t expected_job)
+/*
+ * Wait for this job's completion pulse. The pulse carries two things now: the
+ * job id in its code (PROTO_PULSE_DONE + job_id) and the calculated median in
+ * its value word, as the float's 32 bits. A pulse for some other job, which
+ * cannot normally happen with one job outstanding, is ignored.
+ */
+static int wait_for_done(name_attach_t *attach, uint32_t expected_job,
+                         float *median_out)
 {
     for (;;) {
         struct _pulse pulse;
@@ -123,9 +130,11 @@ static int wait_for_done(name_attach_t *attach, uint32_t expected_job)
             (void)MsgError(rcvid, ENOSYS);
             continue;
         }
-        if (pulse.code == PROTO_PULSE_DONE &&
-            (uint32_t)pulse.value.sival_int == expected_job)
+        if (pulse.code == PROTO_PULSE_DONE + (int)expected_job) {
+            if (median_out != NULL)
+                *median_out = proto_pulse_to_float(pulse.value.sival_int);
             return 0;
+        }
     }
 }
 
@@ -147,6 +156,9 @@ int main(int argc, char **argv)
     int region_opened = 0;
     float *raw = NULL, *sorted_all = NULL, *filtered_all = NULL;
     size_t total = 0;
+    size_t recording_total = 0;
+    float server_global_median = 0.0f;
+    int have_server_median = 0;
     uint32_t job_id = 1;
     int status = EXIT_FAILURE;
 
@@ -204,6 +216,7 @@ int main(int argc, char **argv)
 
     loader = block_loader_open(argv[1], layout, channel, rate);
     if (!loader) goto cleanup;
+    recording_total = block_loader_total_samples(loader);
 
     for (;;) {
         proto_block_t block;
@@ -214,6 +227,7 @@ int main(int argc, char **argv)
         int n;
         proto_fetch_t fetch;
         proto_result_t result;
+        float pulse_median;
         unsigned slot_index;
         const unsigned char *base;
         const proto_shm_slot_t *slot;
@@ -231,6 +245,14 @@ int main(int argc, char **argv)
         memcpy(raw + total, block.samples, (size_t)n * sizeof(float));
 
         proto_submit_prepare(&submit, job_id, &desc);
+        /*
+         * Tell the server when the recording ends: that block's completion is
+         * what gives the whole recording a global median. The loader knows the
+         * recording's length, so the client can flag it here instead of making
+         * the server infer it from the data.
+         */
+        submit.flags = (total + (size_t)n == recording_total)
+                       ? PROTO_SUBMIT_LAST : 0u;
         SETIOV(&send_iov[0], &submit, sizeof(submit));
         SETIOV(&send_iov[1], &block, sizeof(block));
         SETIOV(&reply_iov, &ack, sizeof(ack));
@@ -243,7 +265,12 @@ int main(int argc, char **argv)
                     job_id, proto_status_str(ack.status));
             goto cleanup;
         }
-        if (wait_for_done(pulse_attach, job_id) != 0) goto cleanup;
+        pulse_median = 0.0f;
+        if (wait_for_done(pulse_attach, job_id, &pulse_median) != 0) goto cleanup;
+        /* One line per completion: code, job and the median the pulse carried. */
+        printf("pulse: job=%u code=%d median=%.7g%s\n",
+               job_id, PROTO_PULSE_DONE + (int)job_id, (double)pulse_median,
+               (submit.flags & PROTO_SUBMIT_LAST) ? "  (global)" : "");
 
         memset(&fetch, 0, sizeof(fetch));
         fetch.type = PROTO_MSG_FETCH;
@@ -277,6 +304,43 @@ int main(int argc, char **argv)
         if (proto_checksum(shared_sorted, bytes) != result.sorted_checksum ||
             proto_checksum(shared_filtered, bytes) != result.filtered_checksum) {
             fprintf(stderr, "client: shared-memory checksum mismatch\n"); goto cleanup;
+        }
+        /*
+         * On the recording's last block the server has published the run: the
+         * global median -- also delivered in the pulse -- and the memory-offset
+         * descriptor of the whole recording, merged into one sorted array.
+         * Check that the descriptor is complete, that its array matches its own
+         * checksum, and that the two copies of the global median (pulse value
+         * and descriptor) are the same number.
+         */
+        if ((submit.flags & PROTO_SUBMIT_LAST) != 0) {
+            const proto_run_t *run = (const proto_run_t *)(const void *)
+                (base + PROTO_RUN_BASE);
+            const float *global_sorted = (const float *)(const void *)
+                (base + PROTO_RUN_SORTED_OFFSET);
+            size_t global_bytes = (size_t)run->length * sizeof(float);
+
+            if (run->magic != PROTO_RUN_MAGIC ||
+                run->version != PROTO_RUN_VERSION ||
+                run->jobs != job_id ||
+                run->total_samples != (uint32_t)recording_total ||
+                run->length != (uint32_t)recording_total ||
+                run->sorted_offset != PROTO_RUN_SORTED_OFFSET ||
+                global_bytes > region.bytes - PROTO_RUN_SORTED_OFFSET) {
+                fprintf(stderr, "client: run descriptor failed validation\n");
+                goto cleanup;
+            }
+            if (proto_checksum(global_sorted, global_bytes) != run->sorted_checksum) {
+                fprintf(stderr, "client: globally sorted array checksum mismatch\n");
+                goto cleanup;
+            }
+            if (proto_float_to_pulse(run->global_median) !=
+                proto_float_to_pulse(pulse_median)) {
+                fprintf(stderr, "client: pulse median and run descriptor disagree\n");
+                goto cleanup;
+            }
+            server_global_median = run->global_median;
+            have_server_median = 1;
         }
         memcpy(sorted_all + total, shared_sorted, bytes);
         memcpy(filtered_all + total, shared_filtered, bytes);
@@ -322,6 +386,24 @@ int main(int argc, char **argv)
         printf("recording complete: samples=%lu global_median=%.9g "
                "rolling_filter_width=%u global_outliers=%u\n",
                (unsigned long)total, (double)global_median, cfg.width, outliers);
+        /*
+         * Cross-check. The server merged its four blocks into one sorted array
+         * and took the median of that; the client sorted the concatenation of
+         * the same blocks itself. Same values, same median_of_sorted, so the two
+         * must agree bit for bit -- testing bit patterns rather than ==, because
+         * +0.0 and -0.0 compare equal but are different answers.
+         */
+        if (have_server_median) {
+            if (proto_float_to_pulse(server_global_median) !=
+                proto_float_to_pulse(global_median)) {
+                fprintf(stderr, "client: server and client global medians differ: "
+                                "%.9g vs %.9g\n",
+                        (double)server_global_median, (double)global_median);
+                goto cleanup;
+            }
+            printf("cross-check: server pulse/descriptor median %.9g == client %.9g\n",
+                   (double)server_global_median, (double)global_median);
+        }
     }
 
     /* Persist the outputs. Each of the three .bin files has the same shape as

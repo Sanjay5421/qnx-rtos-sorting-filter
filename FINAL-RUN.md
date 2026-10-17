@@ -53,8 +53,8 @@ sha256sum ifs-rpi4.bin
 | | |
 | --- | --- |
 | Path | `RT-MOMS/images/ifs-rpi4.bin` |
-| Size | 37 742 192 B |
-| SHA-256 | `57637557e9a8565974714802f412f074767bc1d3d5fab1c2779437d045588c49` |
+| Size | 37 775 020 B |
+| SHA-256 | `9f875858d38027bae35ea23843e9ddb1f58207e96beb3c7c7d5ede4b49b87a98` |
 
 Copy it to the SD card's FAT partition beside `config.txt` (`kernel=ifs-rpi4.bin`)
 and the firmware files (`start4.elf`, `fixup4.dat`, `bcm2711-rpi-4-b.dtb`,
@@ -80,7 +80,7 @@ sortmed-server &
 Expected first line:
 
 ```
-sortmed-server: service 'sortmed' ready; shm=/sortmed-results (524376 bytes)
+sortmed-server: service 'sortmed' ready; shm=/sortmed-results (764416 bytes)
 ```
 
 Wait for the region to exist — this is the clean "the server is up" signal,
@@ -129,13 +129,26 @@ time column is the real one: it advances ~74.8 ms per sample, not 10 ms.
 Expected output — one line per block, then a summary, then the write-back:
 
 ```
-job=1 samples=16384 block_median=3.9618 outliers=… elapsed=… ns
-job=2 samples=16384 block_median=3.6416 outliers=… elapsed=… ns
-job=3 samples=16384 block_median=3.3841 outliers=… elapsed=… ns
-job=4 samples=10848 block_median=2.9735 outliers=… elapsed=… ns
-recording complete: samples=60000 global_median=… rolling_filter_width=9 global_outliers=…
+pulse: job=1 code=17 median=3.961808
+pulse: job=2 code=18 median=3.641635
+pulse: job=3 code=19 median=3.384104
+pulse: job=4 code=20 median=3.566194  (global)
+job=1 samples=16384 block_median=3.961808 outliers=431 elapsed=… ns
+job=2 samples=16384 block_median=3.641635 outliers=382 elapsed=… ns
+job=3 samples=16384 block_median=3.384104 outliers=406 elapsed=… ns
+job=4 samples=10848 block_median=2.973536 outliers=283 elapsed=… ns
+recording complete: samples=60000 global_median=3.56619358 rolling_filter_width=9 global_outliers=1502
+cross-check: server pulse/descriptor median 3.56619358 == client 3.56619358
 output written: raw.bin (240000 bytes), sorted.bin (240000 bytes), filtered.bin (240000 bytes), medians.csv (4 blocks)
 ```
+
+The `pulse:` line is printed the moment the completion pulse arrives and is
+purely what the pulse carried: its code (16 + the job id) and the median decoded
+from its value word — the block's median for the first three blocks, the global
+one for the last. The `job=` line follows once the per-block result has been
+fetched out of the shared region. The `cross-check:` line is the client agreeing
+with the server: it merged and sorted the same 60 000 values itself, and the two
+medians must be identical to the bit.
 
 For the voltage channel the four block medians are the numbers `pipeline_demo`
 prints (`3.9618`, `3.6416`, `3.3841`, `2.9735`): the server and the demo call the
@@ -269,6 +282,7 @@ two need no payload at all.
 
 ```sh
 test_shared_memory        # the region's bounds and layout
+test_kpi                  # sort scaling, filter cost, global merge (the KPIs)
 test_median               # the rolling filter
 test_mergesort /data      # the parallel sort
 test_sensor /data         # the virtual sensor
@@ -284,6 +298,7 @@ test_protocol             # the message definition
 | `test_mergesort /data` | 578 checks, 0 failed, 0 skipped | 578, 0 failed, 0 skipped |
 | `test_median` | 7551 checks, 0 failed, 0 skipped | not yet |
 | `test_shared_memory` | 13 checks, 0 failures | not yet |
+| `test_kpi` | 79 checks, 0 failures; sort 0.872 / 0.515 / 0.334 ms per block at 1 / 2 / 4 workers (2.61×), filter 0.59 ms, global merge 0.53 ms | not yet |
 
 `0 failed` **and** `0 skipped` together mean the suite ran *and* found its payload.
 
@@ -307,8 +322,16 @@ test_protocol             # the message definition
 
 - **The synchronous path**: `name_open` → `MsgSendv` of `{header, 64 KiB block}`
   (the two-part IOV) → validation → ack.
-- **The asynchronous path**: the server pulsing code 16 with the job id, and the
-  client fetching the result afterwards.
+- **The asynchronous path**: the pulse carries the calculated median — the job
+  id in its code (`PROTO_PULSE_DONE + job_id`) and the float's 32 bits in its
+  value word, the global median once the recording's last block is done — and
+  the client fetches the per-block result afterwards.
+- **The memory-offset descriptor in the region**: behind the slots, at
+  `PROTO_RUN_BASE`, the server publishes the run descriptor — the global median,
+  the byte offset of the globally sorted recording, its length and its checksum.
+  The client verifies the magic, the array checksum, and that the pulse and the
+  descriptor carry the same median, then compares that median with the one it
+  computed itself.
 - **Shared memory**: the sorted and filtered arrays read back out of
   `/dev/shmem/sortmed-results` and checksum-verified, with per-block descriptors
   (offsets, length, checksums) instead of bulk data in messages.
