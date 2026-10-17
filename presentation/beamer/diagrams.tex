@@ -21,11 +21,11 @@
 % beside it; the caption is set small for the same reason.
 \newcommand{\columnsimage}[3]{%
   \begin{columns}[c, onlytextwidth]
-    \begin{column}{0.63\textwidth}
-      \includegraphics[width=\linewidth, height=0.52\textheight,
+    \begin{column}{0.62\textwidth}
+      \includegraphics[width=\linewidth, height=0.50\textheight,
                        keepaspectratio]{assets/#1}
     \end{column}
-    \begin{column}{0.35\textwidth}
+    \begin{column}{0.36\textwidth}
       {\scriptsize #3}
     \end{column}
   \end{columns}%
@@ -44,7 +44,7 @@
     \node[block, right=34mm of client, minimum width=36mm, minimum height=15mm] (server)
       {SERVER\\[1mm]\tiny validates, sorts on a worker pool,\\filters};
     % --- protocol band
-    \node[accent block, above=16mm of $(client)!0.5!(server)$, minimum width=52mm]
+    \node[accent block, above=14mm of $(client)!0.5!(server)$, minimum width=52mm]
       (proto) {protocol.h — one message definition};
     % --- flow arrows
     \draw[flow] ([yshift=3mm]client.east) -- node[edge label, above]
@@ -58,11 +58,11 @@
     \draw[flow dashed] (proto.south east) -- (server.north);
   \end{tikzpicture}
   \end{center}
-  \vskip2mm
+  \vskip1.5mm
   \begin{highlight}
-    Both programs are compiled against the same header, and the 64 KiB block
-    crosses as the second part of an IOV — the header is read, validated, and
-    only then is the payload pulled.
+    Both programs compile against the same header file. The 64 KiB block crosses as the
+    second part of an IOV transfer: the header is read, validated, and only then is the
+    payload pulled into memory.
   \end{highlight}
 \end{frame}%
 }
@@ -72,12 +72,12 @@
 \newcommand{\clientFlowchartSlide}{%
 \begin{frame}{Client: connect, offload, collect}
   \begin{center}
-  \begin{tikzpicture}[node distance=3mm and 7mm, font=\tiny, scale=0.92,
+  \begin{tikzpicture}[node distance=2.6mm and 6.5mm, font=\tiny, scale=0.88,
                       transform shape, every node/.style={outer sep=1pt}]
     \node[accent block] (start) {start};
     \node[block, below=of start] (open) {\texttt{name\_open("sortmed")}};
     \node[block, below=of open] (retry) {server up?};
-    \node[block, right=12mm of retry] (deadline) {10 s deadline\\expired?};
+    \node[block, right=10mm of retry] (deadline) {10 s deadline\\expired?};
     \node[block, below=of retry] (block) {next 64 KiB block};
     \node[block, below=of block] (send) {\texttt{MsgSendv} \{header, block\}};
     \node[block, below=of send] (ack) {ack: accepted?};
@@ -94,8 +94,8 @@
     \draw[flow] (ack) -- node[edge label, right]{yes} (wait);
     \draw[flow] (ack.west) -| node[edge label, left, pos=0.3]{refused} (block.west);
     \draw[flow] (wait) -- node[edge label, right]{pulse} (fetch);
-    \draw[flow] (fetch.east) -- ++(8mm,0) |- node[edge label, right, pos=0.75]{more blocks} (block.east);
-    \node[edge label, below=1.5mm of fetch, text width=56mm, align=center]
+    \draw[flow] (fetch.east) -- ++(7mm,0) |- node[edge label, right, pos=0.75]{more blocks} (block.east);
+    \node[edge label, below=1mm of fetch, text width=60mm, align=center]
       {no server within 10 s $\rightarrow$ report it and exit, never hang};
   \end{tikzpicture}
   \end{center}
@@ -107,18 +107,18 @@
 \newcommand{\serverFlowchartSlide}{%
 \begin{frame}{Server: accept, validate, answer}
   \begin{center}
-  \begin{tikzpicture}[node distance=3mm and 6mm, font=\tiny, scale=0.92,
+  \begin{tikzpicture}[node distance=2.6mm and 5.5mm, font=\tiny, scale=0.88,
                       transform shape, every node/.style={outer sep=1pt}]
     % main loop on the left, jobs down the right
     \node[accent block] (start) {\texttt{name\_attach("sortmed")}};
     \node[block, below=of start] (recv) {receive a message};
     \node[block, below=of recv] (type) {which type?};
-    \node[block, right=12mm of type] (fetch) {\texttt{FETCH}\\reply the result};
-    \node[block, left=14mm of type] (invalid) {refuse and reply};
+    \node[block, right=10mm of type] (fetch) {\texttt{FETCH}\\reply the result};
+    \node[block, left=12mm of type] (invalid) {refuse and reply};
     \node[block, below=of type] (check) {descriptor valid?\\checksum matches?};
     \node[block, below=of check] (queue) {reply the ack, then queue the job};
     \node[block, below=of queue] (sort) {workers: merge sort};
-    \node[block, below=of sort] (median) {rolling median on the copy};
+    \node[block, below=of sort] (median) {rolling median on copy};
     \node[accent block, below=of median] (pulse) {\texttt{MsgSendPulse} — code 16};
 
     \draw[flow] (start) -- (recv);
@@ -132,10 +132,10 @@
     \draw[flow] (median) -- (pulse);
 
     % the loop back to receiving, on whichever side a branch sits
-    \draw[flow] (fetch.east) -- ++(5mm,0) |- node[edge label, right, pos=0.8]{} (recv.east);
-    \draw[flow] (invalid.west) -- ++(-5mm,0) |- (recv.west);
-    \draw[flow] (check.west) -- ++(-6mm,0) |- node[edge label, left, pos=0.75]{no} (recv.west);
-    \draw[flow] (pulse.east) -- ++(5mm,0) |- (recv.east);
+    \draw[flow] (fetch.east) -- ++(4mm,0) |- node[edge label, right, pos=0.8]{} (recv.east);
+    \draw[flow] (invalid.west) -- ++(-4mm,0) |- (recv.west);
+    \draw[flow] (check.west) -- ++(-5mm,0) |- node[edge label, left, pos=0.75]{no} (recv.west);
+    \draw[flow] (pulse.east) -- ++(4mm,0) |- (recv.east);
   \end{tikzpicture}
   \end{center}
 \end{frame}%
@@ -146,34 +146,34 @@
 \newcommand{\dataFlowSlide}{%
 \begin{frame}{Data flow: what changes at each step}
   \begin{center}
-  \begin{tikzpicture}[node distance=4mm and 4mm, font=\tiny, scale=0.95,
+  \begin{tikzpicture}[node distance=3mm and 3.5mm, font=\tiny, scale=0.90,
                       transform shape]
-    \node[block, minimum width=26mm] (file)
-      {recording on disk\\\tiny float32, 60\,000 samples\\one channel per file};
-    \node[block, right=9mm of file, minimum width=29mm] (sensor)
+    \node[block, minimum width=25mm] (file)
+      {recording on disk\\\tiny float32, 60\,000 samples\\planar or interleaved};
+    \node[block, right=7mm of file, minimum width=27mm] (sensor)
       {virtual sensor\\\tiny 128-sample frames\\index $\rightarrow$ timestamp};
-    \node[block, right=9mm of sensor, minimum width=29mm] (loader)
+    \node[block, right=7mm of sensor, minimum width=27mm] (loader)
       {block loader\\\tiny 16\,384 samples = 64 KiB\\min, max, FNV-1a};
-    \node[block, right=9mm of loader, minimum width=31mm] (wire)
+    \node[block, right=7mm of loader, minimum width=29mm] (wire)
       {message\\\tiny \{descriptor, block\}\\+ version and job id};
 
     \draw[flow] (file) -- node[edge label, above]{read} (sensor);
     \draw[flow] (sensor) -- node[edge label, above]{frame} (loader);
     \draw[flow] (loader) -- node[edge label, above]{submit} (wire);
 
-    \node[block, below=12mm of sensor, minimum width=29mm] (sorted)
+    \node[block, below=10mm of sensor, minimum width=27mm] (sorted)
       {sorted copy\\\tiny order destroyed\\median as a by-product};
-    \node[block, right=9mm of sorted, minimum width=29mm] (filtered)
+    \node[block, right=7mm of sorted, minimum width=27mm] (filtered)
       {time-ordered copy\\\tiny order intact\\rolling median};
-    \node[accent block, right=9mm of filtered, minimum width=31mm] (result)
+    \node[accent block, right=7mm of filtered, minimum width=29mm] (result)
       {result\\\tiny median, window width,\\outliers, offset + checksum};
 
-    \draw[flow dashed] (wire.south) -- ++(0,-5mm) -| (sorted.north);
+    \draw[flow dashed] (wire.south) -- ++(0,-4mm) -| (sorted.north);
     \draw[flow] (sorted) -- (filtered);
     \draw[flow] (filtered) -- (result);
   \end{tikzpicture}
   \end{center}
-  \vskip2mm
+  \vskip1mm
   \begin{columns}[t, onlytextwidth]
     \begin{column}{0.48\textwidth}
       \begin{highlight}
