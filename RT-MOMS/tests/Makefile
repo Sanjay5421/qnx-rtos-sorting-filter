@@ -27,18 +27,22 @@ ifeq ($(origin CC),default)
 CC := gcc
 endif
 CFLAGS ?= -std=c99 -Wall -Wextra -O2 -g
+# median.c uses fabsf. Linux needs -lm named; MinGW and qcc link it anyway.
+LDLIBS ?= -lm
 
 APP     = ../app
 DATASET = ../../data/artifacts/dataset
 
-SOURCES        = $(APP)/sensor.c $(APP)/protocol.c $(APP)/block_loader.c
+SOURCES        = $(APP)/sensor.c $(APP)/protocol.c $(APP)/block_loader.c \
+                 $(APP)/median.c $(APP)/shared_memory.c
 THREAD_SOURCES = $(SOURCES) $(APP)/mergesort.c
 HEADERS        = $(APP)/sensor.h $(APP)/protocol.h $(APP)/block_loader.h \
-                 $(APP)/mergesort.h
+                 $(APP)/mergesort.h $(APP)/median.h $(APP)/shared_memory.h
 
-TESTS    = test_sensor test_protocol test_block_loader test_mergesort
+TESTS    = test_sensor test_protocol test_block_loader test_mergesort test_median test_shared_memory
 DEMOS    = sensor_demo loader_demo pipeline_demo
-PLAIN    = test_sensor test_protocol test_block_loader sensor_demo loader_demo
+PLAIN    = test_sensor test_protocol test_block_loader test_median test_shared_memory sensor_demo \
+           loader_demo
 THREADED = test_mergesort pipeline_demo
 
 # Windows needs the extension on the binary it has just produced.
@@ -72,7 +76,7 @@ all: $(BINS)
 # Every binary links the whole application-side library: it is small, and a
 # per-target source list would only be one more thing to keep in step.
 $(addsuffix $(EXE),$(PLAIN)): %$(EXE): %.c $(SOURCES) $(HEADERS)
-	$(CC) $(CFLAGS) -o $@ $< $(SOURCES)
+	$(CC) $(CFLAGS) -o $@ $< $(SOURCES) $(LDLIBS)
 
 $(addsuffix $(EXE),$(THREADED)): %$(EXE): %.c $(THREAD_SOURCES) $(HEADERS)
 	@if [ -z "$(THREADCC)" ]; then \
@@ -80,7 +84,7 @@ $(addsuffix $(EXE),$(THREADED)): %$(EXE): %.c $(THREAD_SOURCES) $(HEADERS)
 		echo "  mingw32-make check THREADCC=/c/msys64/mingw64/bin/gcc.exe"; \
 		exit 1; \
 	fi
-	$(THREADCC) $(CFLAGS) -o $@ $< $(THREAD_SOURCES)
+	$(THREADCC) $(CFLAGS) -o $@ $< $(THREAD_SOURCES) $(LDLIBS)
 
 check: $(addsuffix $(EXE),$(TESTS))
 	@set -e; for t in $(TESTS); do \
