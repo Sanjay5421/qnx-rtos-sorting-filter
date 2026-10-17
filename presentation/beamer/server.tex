@@ -1,0 +1,83 @@
+\documentclass[tikz,border=8pt]{standalone}
+\usepackage{xcolor}
+\usetikzlibrary{arrows.meta,fit,calc,shapes.geometric}
+\pgfdeclarelayer{lanes}
+\pgfdeclarelayer{engine}
+\pgfsetlayers{lanes,engine,main}
+\newcommand{\api}[1]{{\ttfamily\detokenize{#1}}}
+\definecolor{cli}{RGB}{222,235,247}
+\definecolor{srv}{RGB}{253,235,215}
+\definecolor{shm}{RGB}{226,240,217}
+\definecolor{eng}{RGB}{255,248,225}
+\definecolor{ipcbg}{RGB}{255,242,204}
+\definecolor{ipccol}{RGB}{192,0,0}
+\definecolor{datcol}{RGB}{56,118,29}
+\tikzset{
+  base/.style={draw=black!70, rounded corners=3pt, align=center,
+               font=\footnotesize, inner sep=4pt, minimum height=1.0cm},
+  cnode/.style={base, fill=cli},
+  snode/.style={base, fill=srv},
+  shmnode/.style={base, fill=shm},
+  ipcnode/.style={base, fill=ipcbg, draw=ipccol!70},
+  ext/.style={base, fill=black!8, draw=black!60, rounded corners=0pt},
+  wnode/.style={base, fill=eng, font=\scriptsize, text width=1.4cm,
+                minimum height=0.65cm, inner sep=2pt},
+  note/.style={font=\scriptsize, align=center},
+  flow/.style={-{Latex[length=2.5mm]}, thick, black!75},
+  ipc/.style={-{Latex[length=2.5mm]}, very thick, ipccol},
+  ipcb/.style={{Latex[length=2.5mm]}-{Latex[length=2.5mm]}, very thick, ipccol},
+  dat/.style={-{Latex[length=2.5mm]}, thick, dashed, datcol},
+  lab/.style={font=\scriptsize, inner sep=2pt},
+}
+\newcommand{\legend}[2]{\begin{scope}[shift={(#1,#2)}]
+  \draw[flow] (0,0) -- (0.8,0) node[right, lab]{Internal flow};
+  \draw[ipc]  (3.6,0) -- (4.4,0) node[right, lab]{QNX IPC (message / pulse)};
+  \draw[dat]  (8.6,0) -- (9.4,0) node[right, lab]{Shared-memory access};
+\end{scope}}
+\begin{document}
+\hyphenpenalty=10000\relax\exhyphenpenalty=10000\relax
+\begin{tikzpicture}
+\node[cnode, text width=2.0cm, minimum height=7.6cm] (cl) at (-4.0,-2.6) {\textbf{Client}\\ (producer\\ and\\ consumer)};
+\node[snode, text width=3.6cm] (h) at (1.8,0)
+  {\textbf{Request handler}\\ (main thread)\\ \api{name_attach}, \api{MsgReceive}, validate, \api{MsgReply}, remember client event};
+\node[snode, text width=3.6cm] (d) at (6.6,0)
+  {\textbf{Dispatcher}\\ copy Input to private sort buffer; split into 4 partitions; queue tasks};
+
+\node[font=\scriptsize\bfseries, align=center] (ttl) at (14.4,2.2) {Worker pool (POSIX threads, 1--4 workers)};
+\node[wnode, text width=6.6cm] (tq) at (14.4,1.2) {Task queue protected by a mutex; condition variables signal ``task available'' and ``level complete''};
+\node[wnode] (w0) at (11.6,-0.4) {Worker 0};
+\node[wnode] (w1) at (13.25,-0.4) {Worker 1};
+\node[wnode] (w2) at (14.9,-0.4) {Worker 2};
+\node[wnode] (w3) at (16.55,-0.4) {Worker 3};
+\node[font=\scriptsize, align=center, text width=7.2cm] (tree) at (14.1,-1.6)
+  {Level 0: 4 sorts $\rightarrow$ Level 1: 2 merges $\rightarrow$ Level 2: final merge};
+\begin{pgfonlayer}{engine}
+  \node[draw=orange!70!black, fill=eng!60, rounded corners=5pt, inner sep=5pt,
+        fit=(ttl)(tq)(w0)(w3)(tree)] (pool) {};
+\end{pgfonlayer}
+
+\node[snode, text width=3.8cm] (med) at (12.6,-5.4)
+  {\textbf{Median engine}\\ global median (sorted array); rolling median on original data};
+\node[snode, text width=3.6cm] (wr) at (6.6,-5.4)
+  {\textbf{Result writer}\\ write arrays, then result header last};
+\node[snode, text width=3.6cm] (ev) at (1.8,-5.4)
+  {\textbf{Event notifier}\\ \api{MsgDeliverEvent} to client};
+\node[shmnode, text width=6.4cm, minimum height=0.9cm] (shm) at (4.2,-2.6)
+  {\textbf{Shared memory:} Input area $|$ Result area};
+
+\draw[ipcb] (cl.east |- h.west) -- node[above, lab]{\api{MsgSend} / reply} (h.west);
+\draw[flow] (h) -- (d);
+\draw[flow] (d) -- node[above, lab]{tasks} (pool.west |- d.east);
+\draw[flow] (pool.south -| med.north) -- node[right, lab]{sorted array} (med.north);
+\draw[flow] (med) -- node[above, lab]{results} (wr);
+\draw[flow] (wr) -- (ev);
+\draw[ipc] (ev.west) -- node[above, lab]{pulse} (cl.east |- ev.west);
+\draw[dat] (cl.east |- shm.west) -- node[above, lab]{write / read} (shm.west);
+\draw[dat] (shm.north -| d.south) -- node[right, lab]{read input} (d.south);
+\draw[dat] (wr.north) -- node[right, lab]{write results} (wr.north |- shm.south);
+
+\node[note, text width=15cm] at (6.5,-7.4)
+  {\textbf{Memory:} shared region (Input, Result) is accessed by offsets only; the sort buffer, partitions and task queue are private to the server process (heap). The median engine reads the original input, never the sorted copy.};
+\legend{3.5}{-8.6}
+\end{tikzpicture}
+\end{document}

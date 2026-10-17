@@ -4,7 +4,7 @@
 % Structure:
 %   1. Introduction (What the service does, Why median vs average, Core rules)
 %   2. System Architecture & Workflows (Block diagram, client/server flowcharts)
-%   3. Implementation: How M1 & M2 Work (Protocol, Virtual Sensor, Block Loader, Parallel Merge Sort)
+%   3. Implementation (Protocol, Virtual Sensor, Block Loader, Parallel Merge Sort)
 %   4. Dataset & File Format (PyBaMM data, One-time Planar vs Interleaved note, Interleaved layout)
 %   5. Dedicated Module Testbenches (What it does, How it's done, Output for each module)
 %   6. Two-Fold Verification & Results (Host tests, Target QNX console results, Core scaling sweep)
@@ -102,12 +102,12 @@
 \end{frame}
 
 % ---------------------------------------------------------------------------
-\begin{frame}{How Milestones M1 and M2 Fit Together}
+\begin{frame}{How the Modules Fit Together}
   \begin{columns}[t, onlytextwidth]
     \begin{column}{0.49\textwidth}
       \smalltext\compactitem
       \begin{tech}
-        \textbf{Milestone 1: Data \& Input Pipeline}
+        \textbf{Data \& Input Pipeline}
         \begin{itemize}
           \item \texttt{protocol.h}: Defines the 64 KiB block, shipping label (descriptor), FNV-1a checksum seal, and IPC messages.
           \item \texttt{sensor.c}: Reads the binary recording on disk through a 4096-record RAM window like a live sensor.
@@ -118,7 +118,7 @@
     \begin{column}{0.48\textwidth}
       \smalltext\compactitem
       \begin{highlight}
-        \textbf{Milestone 2: Parallel Merge Sort}
+        \textbf{Parallel Merge Sort}
         \begin{itemize}
           \item \texttt{mergesort.c}: Splits the 16\,384-sample block across a pool of POSIX worker threads.
           \item Coordinates phases using \textbf{1 mutex} and \textbf{2 condition variables} (\texttt{work\_ready} and \texttt{phase\_done}).
@@ -126,7 +126,7 @@
         \end{itemize}
       \end{highlight}
       \vskip1.5mm
-      \key{M1 packs and seals 64 KiB blocks; M2 sorts them across CPU cores}
+      \key{The pipeline packs and seals 64 KiB blocks; the sort consumes them}
     \end{column}
   \end{columns}
 \end{frame}
@@ -143,51 +143,9 @@
 % ---------------------------------------------------------------------------
 \serverFlowchartSlide
 
-% ---------------------------------------------------------------------------
-\dataFlowSlide
-
-% ===========================================================================
-\section{How M1 \& M2 Work}
-% ===========================================================================
-
-\begin{frame}{M1 — Why 16\,384 Samples \& How the Seal Works (\texttt{protocol.h})}
-  \begin{columns}[t, onlytextwidth]
-    \begin{column}{0.51\textwidth}
-      \smalltext\compactitem
-      \textbf{Why 16\,384 samples per block?}
-      \begin{itemize}
-        \item Each sensor reading is a 32-bit \texttt{float} (\textbf{4 bytes}).
-        \item Course rule: transfer at least \textbf{64 KiB} ($65\,536$ B) per block.
-        \item $65\,536 \div 4 = \mathbf{16\,384\text{ samples}}$ (\texttt{float samples[16384]}), hitting 64 KiB with zero wasted padding.
-      \end{itemize}
-      \vskip1mm
-      \textbf{How a 60\,000-sample run is packed:}
-      \begin{itemize}
-        \item Blocks 0, 1, 2: \textbf{16\,384 samples} each (full crates).
-        \item Block 3: remaining \textbf{10\,848 samples}, plus \textbf{5\,536 zeros} at the tail so the buffer is still 64 KiB.
-      \end{itemize}
-    \end{column}
-    \begin{column}{0.46\textwidth}
-      \smalltext\compactitem
-      \begin{tech}
-        \textbf{Shipping Label (\texttt{proto\_block\_desc\_t})}
-        \begin{itemize}
-          \item \texttt{seq} \& \texttt{first\_sample}: Crate index (0..3) and start sample.
-          \item \texttt{samples}: Real readings inside ($16\,384$ or $10\,848$).
-          \item \texttt{min\_val}, \texttt{max\_val}, \texttt{checksum}: Range and FNV-1a seal.
-        \end{itemize}
-      \end{tech}
-      \vskip1mm
-      \begin{highlight}
-        \textbf{What is the seal?} \\
-        \texttt{proto\_checksum\_block()} hashes every byte of the real samples into one 32-bit number (e.g.\ \texttt{0xe90d24d2}). If 1 bit flips in transit, the server rejects the block.
-      \end{highlight}
-    \end{column}
-  \end{columns}
-\end{frame}
 
 % ---------------------------------------------------------------------------
-\begin{frame}{M1 — How the Virtual Sensor Works (\texttt{app/sensor.c})}
+\begin{frame}{How the Virtual Sensor Works (\texttt{app/sensor.c})}
   \begin{columns}[t, onlytextwidth]
     \begin{column}{0.52\textwidth}
       \smalltext\compactitem
@@ -217,7 +175,7 @@
 \end{frame}
 
 % ---------------------------------------------------------------------------
-\begin{frame}[fragile]{M1 — Virtual Sensor: Line-by-Line Code Walkthrough}
+\begin{frame}[fragile]{Virtual Sensor: Line-by-Line Code Walkthrough}
   \begin{columns}[t, onlytextwidth]
     \begin{column}{0.52\textwidth}
 \begin{lstlisting}
@@ -251,7 +209,7 @@ while (n < cap) {
 \end{frame}
 
 % ---------------------------------------------------------------------------
-\begin{frame}{M1 — How the Block Loader Works (\texttt{app/block\_loader.c})}
+\begin{frame}{How the Block Loader Works (\texttt{app/block\_loader.c})}
   \begin{columns}[t, onlytextwidth]
     \begin{column}{0.51\textwidth}
       \smalltext\compactitem
@@ -281,7 +239,7 @@ while (n < cap) {
 \end{frame}
 
 % ---------------------------------------------------------------------------
-\begin{frame}[fragile]{M1 — Block Loader: Line-by-Line Code Walkthrough}
+\begin{frame}[fragile]{Block Loader: Line-by-Line Code Walkthrough}
   \begin{columns}[t, onlytextwidth]
     \begin{column}{0.52\textwidth}
 \begin{lstlisting}
@@ -314,7 +272,7 @@ desc->checksum = proto_checksum_block(block->samples,
 \end{frame}
 
 % ---------------------------------------------------------------------------
-\begin{frame}{M1 — Protocol Conversation Between Client \& Server}
+\begin{frame}{Protocol Conversation Between Client \& Server}
   \begin{columns}[t, onlytextwidth]
     \begin{column}{0.52\textwidth}
       \texttt{app/protocol.h} defines the 5 messages used across QNX IPC:
@@ -393,7 +351,7 @@ desc->checksum = proto_checksum_block(block->samples,
 \end{frame}
 
 % ---------------------------------------------------------------------------
-\begin{frame}{M2 — How Parallel Merge Sort Splits \& Merges (\texttt{mergesort.c})}
+\begin{frame}{How Parallel Merge Sort Splits \& Merges (\texttt{mergesort.c})}
   \begin{columns}[t, onlytextwidth]
     \begin{column}{0.53\textwidth}
       \smalltext\compactitem
@@ -422,7 +380,7 @@ desc->checksum = proto_checksum_block(block->samples,
 \end{frame}
 
 % ---------------------------------------------------------------------------
-\begin{frame}[fragile]{M2 — Parallel Merge Sort: Line-by-Line Code Walkthrough}
+\begin{frame}[fragile]{Parallel Merge Sort: Line-by-Line Code Walkthrough}
   \begin{columns}[t, onlytextwidth]
     \begin{column}{0.53\textwidth}
 \begin{lstlisting}
@@ -885,8 +843,8 @@ if (++p->tasks_done == p->ntasks)
     \begin{column}{0.48\textwidth}
       \smalltext\compactitem
       \begin{itemize}
-        \item \textbf{Milestone 1 (Complete)}: 64 KiB block contract (\texttt{protocol.h}), sliding-window virtual sensor (\texttt{sensor.c}), strided block loader (\texttt{block\_loader.c}), and PyBaMM interleaved dataset.
-        \item \textbf{Milestone 2 (Complete)}: Multi-threaded parallel merge sort (\texttt{mergesort.c}) with POSIX mutex + condition-variable phase barriers.
+        \item \textbf{Input pipeline (complete)}: the 64 KiB block contract in \texttt{protocol.h}, the sliding-window virtual sensor in \texttt{sensor.c}, the block loader in \texttt{block\_loader.c}, and the PyBaMM interleaved dataset.
+        \item \textbf{Parallel merge sort (complete)}: \texttt{mergesort.c}, multi-threaded with POSIX mutex and condition-variable phase barriers.
         \item \textbf{Two-Fold Verification}: 48 host tests (1473 checks) + on-target QNX Pi 4 verification with 0 failures.
       \end{itemize}
     \end{column}
@@ -896,8 +854,8 @@ if (++p->tasks_done == p->ntasks)
         \item \textbf{Measured Target Speed}: \textbf{0.757 ms} per 64 KiB block on 4 Cortex-A72 cores ($3.01\times$ speedup, $75.55\text{ MiB/s}$).
         \item \textbf{Next Steps}:
           \begin{itemize}
-            \item \textbf{M3}: QNX client--server IPC (\texttt{MsgSendv} / \texttt{MsgReceivev}) and rolling median filter.
-            \item \textbf{M4}: Asynchronous completion pulse (\texttt{MsgDeliverEvent}) and full end-to-end timing.
+            \item The QNX client--server IPC (\texttt{MsgSendv} / \texttt{MsgReceivev}) and the rolling median filter.
+            \item The asynchronous completion pulse (\texttt{MsgDeliverEvent}) and full end-to-end timing.
           \end{itemize}
       \end{itemize}
       \vskip1.5mm

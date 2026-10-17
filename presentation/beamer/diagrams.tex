@@ -33,162 +33,62 @@
 
 % --- 1. System overview: block diagram -------------------------------------
 
+
+% ===========================================================================
+% The four architecture diagrams
+%
+% These are the real ones, supplied as standalone TikZ documents at the top of
+% this folder (project BD.tex, client2.tex, server.tex, dataflow.tex). Each is
+% built to a one-page PDF in diagrams/ and included here whole, rather than
+% redrawn inline -- the originals stay the single source and can be edited and
+% recompiled without touching the deck.
+%
+% They are wide (25-31 cm at natural size), so each is fitted to the slide:
+% full text width where that also clears the height, otherwise capped by
+% height and centred. Both bounds are given to \includegraphics so the smaller
+% of the two wins and the aspect ratio is never distorted.
+% ===========================================================================
+
+% --- block diagram: client, server, worker pool, shared region --------------
+
 \newcommand{\systemOverviewSlide}{%
-\begin{frame}{System overview}
+\begin{frame}{System Architecture}
   \begin{center}
-  \begin{tikzpicture}[node distance=4mm and 6mm, font=\scriptsize]
-    % --- client block
-    \node[block, minimum width=30mm, minimum height=15mm] (client)
-      {CLIENT\\[1mm]\tiny replays interleaved recording,\\assembles 64 KiB blocks};
-    % --- server block
-    \node[block, right=34mm of client, minimum width=36mm, minimum height=15mm] (server)
-      {SERVER\\[1mm]\tiny validates, sorts on a worker pool,\\filters};
-    % --- protocol band
-    \node[accent block, above=14mm of $(client)!0.5!(server)$, minimum width=52mm]
-      (proto) {protocol.h — one message definition};
-    % --- flow arrows
-    \draw[flow] ([yshift=3mm]client.east) -- node[edge label, above]
-      {submit \{header, block\}} ([yshift=3mm]server.west);
-    \draw[flow] ([yshift=-3mm]server.west) -- node[edge label, below]
-      {ack} ([yshift=-3mm]client.east);
-    \draw[flow dashed] ([yshift=-9mm]server.west) -- node[edge label, below]
-      {pulse — async} ([yshift=-9mm]client.east);
-    % --- protocol connects both
-    \draw[flow dashed] (proto.south west) -- (client.north);
-    \draw[flow dashed] (proto.south east) -- (server.north);
-  \end{tikzpicture}
+    \includegraphics[width=\textwidth, height=0.78\textheight,
+                     keepaspectratio]{diagrams/project BD.pdf}
   \end{center}
-  \vskip1.5mm
-  \begin{highlight}
-    Both programs compile against the same header file. The 64 KiB block crosses as the
-    second part of an IOV transfer: the header is read, validated, and only then is the
-    payload pulled into memory.
-  \end{highlight}
 \end{frame}%
 }
 
-% --- 2. Client flowchart ---------------------------------------------------
+% --- client side -----------------------------------------------------------
 
 \newcommand{\clientFlowchartSlide}{%
-\begin{frame}{Client: connect, offload, collect}
+\begin{frame}{Client: Connect, Offload, Collect}
   \begin{center}
-  \begin{tikzpicture}[node distance=2.6mm and 6.5mm, font=\tiny, scale=0.88,
-                      transform shape, every node/.style={outer sep=1pt}]
-    \node[accent block] (start) {start};
-    \node[block, below=of start] (open) {\texttt{name\_open("sortmed")}};
-    \node[block, below=of open] (retry) {server up?};
-    \node[block, right=10mm of retry] (deadline) {10 s deadline\\expired?};
-    \node[block, below=of retry] (block) {next 64 KiB block};
-    \node[block, below=of block] (send) {\texttt{MsgSendv} \{header, block\}};
-    \node[block, below=of send] (ack) {ack: accepted?};
-    \node[block, below=of ack] (wait) {receive on own channel};
-    \node[accent block, below=of wait] (fetch) {fetch the result};
-
-    \draw[flow] (start) -- (open);
-    \draw[flow] (open) -- (retry);
-    \draw[flow] (retry) -- node[edge label, above]{no} (deadline);
-    \draw[flow] (retry) -- node[edge label, right]{yes} (block);
-    \draw[flow] (deadline.south) |- node[edge label, right, pos=0.75]{retry} (open.east);
-    \draw[flow] (block) -- (send);
-    \draw[flow] (send) -- (ack);
-    \draw[flow] (ack) -- node[edge label, right]{yes} (wait);
-    \draw[flow] (ack.west) -| node[edge label, left, pos=0.3]{refused} (block.west);
-    \draw[flow] (wait) -- node[edge label, right]{pulse} (fetch);
-    \draw[flow] (fetch.east) -- ++(7mm,0) |- node[edge label, right, pos=0.75]{more blocks} (block.east);
-    \node[edge label, below=1mm of fetch, text width=60mm, align=center]
-      {no server within 10 s $\rightarrow$ report it and exit, never hang};
-  \end{tikzpicture}
+    \includegraphics[width=\textwidth, height=0.78\textheight,
+                     keepaspectratio]{diagrams/client2.pdf}
   \end{center}
 \end{frame}%
 }
 
-% --- 3. Server flowchart ---------------------------------------------------
+% --- server side -----------------------------------------------------------
 
 \newcommand{\serverFlowchartSlide}{%
-\begin{frame}{Server: accept, validate, answer}
+\begin{frame}{Server: Accept, Validate, Answer}
   \begin{center}
-  \begin{tikzpicture}[node distance=2.6mm and 5.5mm, font=\tiny, scale=0.88,
-                      transform shape, every node/.style={outer sep=1pt}]
-    % main loop on the left, jobs down the right
-    \node[accent block] (start) {\texttt{name\_attach("sortmed")}};
-    \node[block, below=of start] (recv) {receive a message};
-    \node[block, below=of recv] (type) {which type?};
-    \node[block, right=10mm of type] (fetch) {\texttt{FETCH}\\reply the result};
-    \node[block, left=12mm of type] (invalid) {refuse and reply};
-    \node[block, below=of type] (check) {descriptor valid?\\checksum matches?};
-    \node[block, below=of check] (queue) {reply the ack, then queue the job};
-    \node[block, below=of queue] (sort) {workers: merge sort};
-    \node[block, below=of sort] (median) {rolling median on copy};
-    \node[accent block, below=of median] (pulse) {\texttt{MsgSendPulse} — code 16};
-
-    \draw[flow] (start) -- (recv);
-    \draw[flow] (recv) -- (type);
-    \draw[flow] (type) -- node[edge label, above]{fetch} (fetch);
-    \draw[flow] (type) -- node[edge label, above]{refused} (invalid);
-    \draw[flow] (type) -- node[edge label, right]{submit} (check);
-    \draw[flow] (check) -- node[edge label, right]{yes} (queue);
-    \draw[flow] (queue) -- (sort);
-    \draw[flow] (sort) -- (median);
-    \draw[flow] (median) -- (pulse);
-
-    % the loop back to receiving, on whichever side a branch sits
-    \draw[flow] (fetch.east) -- ++(4mm,0) |- node[edge label, right, pos=0.8]{} (recv.east);
-    \draw[flow] (invalid.west) -- ++(-4mm,0) |- (recv.west);
-    \draw[flow] (check.west) -- ++(-5mm,0) |- node[edge label, left, pos=0.75]{no} (recv.west);
-    \draw[flow] (pulse.east) -- ++(4mm,0) |- (recv.east);
-  \end{tikzpicture}
+    \includegraphics[width=\textwidth, height=0.78\textheight,
+                     keepaspectratio]{diagrams/server.pdf}
   \end{center}
 \end{frame}%
 }
 
-% --- 4. Data flow ----------------------------------------------------------
+% --- data flow -------------------------------------------------------------
 
 \newcommand{\dataFlowSlide}{%
-\begin{frame}{Data flow: what changes at each step}
+\begin{frame}{Data Flow}
   \begin{center}
-  \begin{tikzpicture}[node distance=3mm and 3.5mm, font=\tiny, scale=0.90,
-                      transform shape]
-    \node[block, minimum width=25mm] (file)
-      {interleaved file on disk\\\tiny float32, 60\,000 records $\times$ 4\\$[t_s, V, I, T]$};
-    \node[block, right=7mm of file, minimum width=27mm] (sensor)
-      {virtual sensor\\\tiny 128-sample frames\\stride 4, offset $k$};
-    \node[block, right=7mm of sensor, minimum width=27mm] (loader)
-      {block loader\\\tiny 16\,384 samples = 64 KiB\\min, max, FNV-1a};
-    \node[block, right=7mm of loader, minimum width=29mm] (wire)
-      {message\\\tiny \{descriptor, block\}\\+ version and job id};
-
-    \draw[flow] (file) -- node[edge label, above]{read} (sensor);
-    \draw[flow] (sensor) -- node[edge label, above]{frame} (loader);
-    \draw[flow] (loader) -- node[edge label, above]{submit} (wire);
-
-    \node[block, below=10mm of sensor, minimum width=27mm] (sorted)
-      {sorted copy\\\tiny order destroyed\\median as a by-product};
-    \node[block, right=7mm of sorted, minimum width=27mm] (filtered)
-      {time-ordered copy\\\tiny order intact\\rolling median};
-    \node[accent block, right=7mm of filtered, minimum width=29mm] (result)
-      {result\\\tiny median, window width,\\outliers, offset + checksum};
-
-    \draw[flow dashed] (wire.south) -- ++(0,-4mm) -| (sorted.north);
-    \draw[flow] (sorted) -- (filtered);
-    \draw[flow] (filtered) -- (result);
-  \end{tikzpicture}
+    \includegraphics[width=\textwidth, height=0.78\textheight,
+                     keepaspectratio]{diagrams/dataflow.pdf}
   \end{center}
-  \vskip1mm
-  \begin{columns}[t, onlytextwidth]
-    \begin{column}{0.48\textwidth}
-      \begin{highlight}
-        Two buffers, not one. The sort destroys the time order the filter
-        reads, so the arriving block is never sorted in place — its checksum
-        describes it as it arrived.
-      \end{highlight}
-    \end{column}
-    \begin{column}{0.48\textwidth}
-      \begin{tech}
-        Every hand-off in this chain is byte-deterministic: fixed-width
-        fields, cleared structs, a zero-padded short block — so any two
-        stages can be compared exactly.
-      \end{tech}
-    \end{column}
-  \end{columns}
 \end{frame}%
 }

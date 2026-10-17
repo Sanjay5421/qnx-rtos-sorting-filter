@@ -1,0 +1,83 @@
+\documentclass[tikz,border=8pt]{standalone}
+\usepackage{xcolor}
+\usetikzlibrary{arrows.meta,fit,calc,shapes.geometric}
+\pgfdeclarelayer{lanes}
+\pgfdeclarelayer{engine}
+\pgfsetlayers{lanes,engine,main}
+\newcommand{\api}[1]{{\ttfamily\detokenize{#1}}}
+\definecolor{cli}{RGB}{222,235,247}
+\definecolor{srv}{RGB}{253,235,215}
+\definecolor{shm}{RGB}{226,240,217}
+\definecolor{eng}{RGB}{255,248,225}
+\definecolor{ipcbg}{RGB}{255,242,204}
+\definecolor{ipccol}{RGB}{192,0,0}
+\definecolor{datcol}{RGB}{56,118,29}
+\tikzset{
+  base/.style={draw=black!70, rounded corners=3pt, align=center,
+               font=\footnotesize, inner sep=4pt, minimum height=1.0cm},
+  cnode/.style={base, fill=cli},
+  snode/.style={base, fill=srv},
+  shmnode/.style={base, fill=shm},
+  ipcnode/.style={base, fill=ipcbg, draw=ipccol!70},
+  ext/.style={base, fill=black!8, draw=black!60, rounded corners=0pt},
+  wnode/.style={base, fill=eng, font=\scriptsize, text width=1.4cm,
+                minimum height=0.65cm, inner sep=2pt},
+  note/.style={font=\scriptsize, align=center},
+  flow/.style={-{Latex[length=2.5mm]}, thick, black!75},
+  ipc/.style={-{Latex[length=2.5mm]}, very thick, ipccol},
+  ipcb/.style={{Latex[length=2.5mm]}-{Latex[length=2.5mm]}, very thick, ipccol},
+  dat/.style={-{Latex[length=2.5mm]}, thick, dashed, datcol},
+  lab/.style={font=\scriptsize, inner sep=2pt},
+}
+\newcommand{\legend}[2]{\begin{scope}[shift={(#1,#2)}]
+  \draw[flow] (0,0) -- (0.8,0) node[right, lab]{Internal flow};
+  \draw[ipc]  (3.6,0) -- (4.4,0) node[right, lab]{QNX IPC (message / pulse)};
+  \draw[dat]  (8.6,0) -- (9.4,0) node[right, lab]{Shared-memory access};
+\end{scope}}
+\begin{document}
+\hyphenpenalty=10000\relax\exhyphenpenalty=10000\relax
+\tikzset{
+  proc/.style={base, rounded corners=12pt, text width=3.0cm, minimum height=1.3cm},
+  cproc/.style={proc, fill=cli},
+  sproc/.style={proc, fill=srv},
+  store/.style={draw=none, fill=shm, align=center, font=\footnotesize, inner sep=5pt,
+    minimum height=1.1cm, text width=3.2cm,
+    append after command={\pgfextra{\draw[black!70, thick]
+      (\tikzlastnode.north west)--(\tikzlastnode.north east)
+      (\tikzlastnode.south west)--(\tikzlastnode.south east);}}},
+}
+\begin{tikzpicture}
+\node[ext] (e1) at (0,0) {Sensor dataset\\ (CSV)};
+\node[cproc] (p1) at (5.4,0) {\textbf{1. Prepare block}\\ (client)};
+\node[store] (d1) at (10.8,0) {\textbf{D1} shm Input area\\ original time series};
+\node[sproc] (p2) at (16.4,0) {\textbf{2. Validate request}, copy block (server)};
+\node[sproc] (p5) at (10.8,-3.0) {\textbf{5. Rolling median filter}};
+\node[store, fill=srv] (d2) at (16.4,-3.0) {\textbf{D2} private sort buffer\\ copy of block};
+\node[sproc] (p3) at (16.4,-6.0) {\textbf{3. Parallel Merge Sort}};
+\node[sproc] (p4) at (10.8,-6.0) {\textbf{4. Global median}};
+\node[store, minimum height=3.6cm] (d3) at (5.4,-4.5)
+  {\textbf{D3} shm Result area\\ header (median, status, offsets)\\ filtered series\\ sorted array};
+\node[sproc] (p6) at (5.4,-9.0) {\textbf{6. Send completion pulse}};
+\node[cproc] (p7) at (-1.0,-9.0) {\textbf{7. Read results} (client)};
+\node[ext] (e2) at (-6.6,-9.0) {Results log\\ (median, latency)};
+
+\draw[flow] (e1) -- node[above, lab]{float samples} (p1);
+\draw[flow] (p1) -- node[above, lab]{float block} (d1);
+\draw[flow] (d1) -- node[above, lab]{block} (p2);
+\draw[ipc] (p1.north) -- ++(0,1.5) -| node[above, lab, pos=0.25]{request descriptor + completion event (QNX message)} (p2.north);
+\draw[flow] (p2) -- node[right, lab]{block} (d2);
+\draw[flow] (d2) -- node[right, lab]{partitions} (p3);
+\draw[flow] (d1) -- node[right, lab]{original block} (p5);
+\draw[flow] (p3) -- node[above, lab]{sorted array} (p4);
+\draw[flow] (p4.west) -- node[above, lab, align=center]{median +\\ sorted array} (d3.east |- p4.west);
+\draw[flow] (p5.west) -- node[above, lab]{filtered} (d3.east |- p5.west);
+\draw[flow] (d3) -- node[right, lab]{result ready} (p6);
+\draw[ipc] (p6) -- node[above, lab, align=center]{completion\\ pulse} (p7);
+\draw[dat] (d3.west) -| node[pos=0.2, above, lab]{median, filtered, sorted} (p7.north);
+\draw[flow] (p7) -- (e2);
+\draw[flow] (p2.east) -- ++(2.4,0) |- (p6.east);
+\node[lab] at (13.2,-8.7) {client event info (saved for the pulse)};
+\legend{0.5}{-11.0}
+\end{tikzpicture}
+\end{document}
+
