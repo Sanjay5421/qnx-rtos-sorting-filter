@@ -212,13 +212,19 @@ int main(void)
                 jobs[free_index].result.job_id = submit.job_id;
             }
 
-            if (client_coid == -1)
-                client_coid = name_open(CLIENT_NAME, 0);
+            /* Resolve the client for every job. Each run of the client registers
+             * the same name afresh, so a connection cached from a previous run
+             * is a dead one and its pulse would go nowhere. */
+            client_coid = name_open(CLIENT_NAME, 0);
             if (client_coid == -1 ||
                 MsgSendPulse(client_coid, SIGEV_PULSE_PRIO_INHERIT,
                              PROTO_PULSE_DONE, (int)submit.job_id) == -1) {
                 perror("sortmed-server: completion pulse");
                 /* Keep the result fetchable; client can retry the fetch. */
+            }
+            if (client_coid != -1) {
+                name_close(client_coid);
+                client_coid = -1;
             }
         } else if (type == PROTO_MSG_FETCH) {
             proto_fetch_t fetch;

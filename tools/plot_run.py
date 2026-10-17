@@ -2,28 +2,26 @@
 """Plot the outputs of one sortmed run.
 
 Usage:
-    uv run python tools/plot_run.py [DIRECTORY]
+    uv run python tools/plot_run.py RUN_DIR [--out DIR]
 
-DIRECTORY (default: the current directory) is expected to hold the files the
-sortmed client writes:
+RUN_DIR holds the files the client wrote on the board:
 
-    raw.bin       float32, the voltage channel at 100 Hz
-    filtered.bin  float32, outliers replaced by a rolling Hampel median
-    sorted.bin    float32, the same samples ascending          (optional)
-    medians.csv   one row per block: index,samples,median,...  (optional)
+    raw.bin       float32, the channel as received (100 Hz in this dataset)
+    filtered.bin  float32, outliers replaced by the rolling median
+    sorted.bin    float32, the same samples ascending       (optional)
+    medians.csv   block_index,samples,median,outliers_removed (optional)
 
-Every file that is present is plotted; a missing `sorted.bin` or `medians.csv`
-is reported on stdout and simply drops its panel.
+Figures written into OUT (default: RUN_DIR):
 
-Three figures are written into DIRECTORY:
-
-    run_cleaned_vs_noisy.png  the whole recording, noisy vs cleaned
-    run_zoom.png              a few seconds around the worst removed spike
-    run_summary.png           sorted curve, per-block medians, removals in time
+    run_cleaned_vs_noisy.png  the whole recording: received vs filtered, spikes marked
+    run_zoom.png              three stretches where the filter acted, zoomed
+    run_sorted_proof.png      as-received vs sorted, with the checks that prove it
+    run_summary.png           per-block medians and when samples were replaced
 """
 
 from __future__ import annotations
 
+import argparse
 import csv
 import sys
 from pathlib import Path
@@ -35,261 +33,212 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 
-SAMPLE_RATE_HZ = 100.0
-DPI = 150
-ZOOM_SECONDS = 4.0
+RATE_HZ = 100.0
+DPI = 200
+NOISY = "#8d949c"
+FILTER = "#1558d6"
+FLAG = "#d93025"
+MEDIAN = "#188038"
 
-_FLOAT32 = np.dtype("<f4")
-
-# One colour per meaning, reused across the figures.
-_RAW_COLOR = "#9e9e9e"
-_CLEAN_COLOR = "#1f77b4"
-_REMOVED_COLOR = "#d62728"
-_SORTED_COLOR = "#2ca02c"
-
-
-def load_floats(path: Path) -> np.ndarray:
-    """Read a headerless little-endian float32 file into a 1-D array."""
-    return np.fromfile(path, dtype=_FLOAT32)
-
-
-def load_medians(path: Path) -> list[dict[str, float]]:
-    """Read medians.csv as a list of rows keyed by column name."""
-    rows: list[dict[str, float]] = []
-    with path.open(newline="") as handle:
-        for row in csv.DictReader(handle):
-            rows.append(
-                {
-                    "block_index": int(row["block_index"]),
-                    "samples": int(row["samples"]),
-                    "median": float(row["median"]),
-                    "outliers_removed": int(row["outliers_removed"]),
-                }
-            )
-    return rows
+plt.rcParams.update({
+    "font.size": 12,
+    "axes.titlesize": 14,
+    "axes.labelsize": 12.5,
+    "legend.fontsize": 10.5,
+    "xtick.labelsize": 10.5,
+    "ytick.labelsize": 10.5,
+    "axes.linewidth": 0.9,
+    "axes.edgecolor": "#444444",
+    "figure.facecolor": "white",
+    "savefig.facecolor": "white",
+})
 
 
-def plot_overview(directory: Path, t: np.ndarray, raw: np.ndarray,
-                  filtered: np.ndarray, removed: np.ndarray) -> Path:
-    """Full recording: noisy and cleaned overlaid, removed samples marked."""
-    path = directory / "run_cleaned_vs_noisy.png"
-    duration = float(t[-1]) if t.size else 0.0
-    replaced = int(removed.sum())
-
-    fig, ax = plt.subplots(figsize=(15, 5), dpi=DPI)
-    ax.plot(t, raw, lw=0.5, color=_RAW_COLOR, label="raw (noisy)")
-    ax.plot(t, filtered, lw=0.5, color=_CLEAN_COLOR, label="filtered (cleaned)")
-    ax.plot(t[removed], raw[removed], linestyle="none", marker="o", ms=3.0,
-            mfc="none", mec=_REMOVED_COLOR, mew=0.8,
-            label=f"removed by filter ({replaced})")
-
-    ax.set_xlabel("time [s]")
-    ax.set_ylabel("voltage [V]")
-    ax.set_xlim(0.0, duration)
-    ax.grid(True, alpha=0.3)
-    ax.legend(loc="upper right", framealpha=0.9)
-    ax.set_title(f"{directory.name}: raw vs filtered, {raw.size} samples "
-                 f"({duration:.1f} s at {SAMPLE_RATE_HZ:g} Hz)")
-    fig.tight_layout()
-    fig.savefig(path, dpi=DPI)
-    plt.close(fig)
-    return path
+def style(ax, ylabel: str | None = None, xlabel: str | None = None) -> None:
+    ax.grid(True, color="#d8d8d8", linewidth=0.7)
+    ax.set_axisbelow(True)
+    for side in ("top", "right"):
+        ax.spines[side].set_visible(False)
+    if ylabel:
+        ax.set_ylabel(ylabel)
+    if xlabel:
+        ax.set_xlabel(xlabel)
 
 
-def plot_zoom(directory: Path, t: np.ndarray, raw: np.ndarray,
-              filtered: np.ndarray, removed: np.ndarray) -> Path:
-    """A few seconds around the largest cut so a spike is visibly clipped."""
-    path = directory / "run_zoom.png"
-
-    deviation = np.abs(raw - filtered)
-    score = np.where(removed, deviation, -1.0)
-    centre = int(np.argmax(score)) if removed.any() else int(np.argmax(deviation))
-    half = max(1, int(round(ZOOM_SECONDS * SAMPLE_RATE_HZ / 2.0)))
-    lo = max(0, centre - half)
-    hi = min(raw.size, centre + half)
-
-    window = slice(lo, hi)
-    view = removed[window]
-    cut = int(view.sum())
-
-    fig, ax = plt.subplots(figsize=(12, 5), dpi=DPI)
-    ax.plot(t[window], raw[window], lw=1.1, color=_RAW_COLOR, label="raw (noisy)")
-    ax.plot(t[window], filtered[window], lw=1.1, color=_CLEAN_COLOR,
-            label="filtered (cleaned)")
-    ax.plot(t[window][view], raw[window][view], linestyle="none", marker="o",
-            ms=6.0, mfc="none", mec=_REMOVED_COLOR, mew=1.4,
-            label=f"removed by filter ({cut})")
-
-    ax.set_xlabel("time [s]")
-    ax.set_ylabel("voltage [V]")
-    ax.grid(True, alpha=0.3)
-    ax.legend(loc="upper right", framealpha=0.9)
-    ax.set_title(f"{directory.name}: zoom {t[lo]:.2f}-{t[hi - 1]:.2f} s, "
-                 f"{cut} spike(s) cut")
-    fig.tight_layout()
-    fig.savefig(path, dpi=DPI)
-    plt.close(fig)
-    return path
+def envelope(x: np.ndarray, bins: int = 1500) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Per-column min and max of a long series, so spikes stay visible."""
+    edges = np.linspace(0, x.size, bins + 1).astype(int)
+    centres = (edges[:-1] + edges[1:]) / 2.0
+    lo = np.array([x[a:b].min() for a, b in zip(edges[:-1], edges[1:])])
+    hi = np.array([x[a:b].max() for a, b in zip(edges[:-1], edges[1:])])
+    return centres, lo, hi
 
 
-def _panel_sorted(ax, sorted_values: np.ndarray) -> None:
-    median = float(np.median(sorted_values))
-    ax.plot(np.arange(sorted_values.size), sorted_values, lw=0.8,
-            color=_SORTED_COLOR, label="sorted samples")
-    ax.axhline(median, color=_REMOVED_COLOR, ls="--", lw=1.0,
-               label=f"median = {median:.6g} V")
-    ax.set_xlabel("rank")
-    ax.set_ylabel("voltage [V]")
-    ax.grid(True, alpha=0.3)
-    ax.legend(loc="upper left", framealpha=0.9)
-    ax.set_title("sorted curve and its median")
+def busiest(flags: np.ndarray, width: int, count: int) -> list[int]:
+    density = np.convolve(flags.astype(np.int32), np.ones(width, np.int32), "valid")
+    order = np.argsort(density)[::-1]
+    picked: list[int] = []
+    for start in order:
+        if density[start] == 0:
+            break
+        if all(abs(int(start) - p) >= width for p in picked):
+            picked.append(int(start))
+        if len(picked) == count:
+            break
+    return sorted(picked)
 
 
-def _panel_blocks(ax, rows: list[dict[str, float]]) -> None:
-    index = [r["block_index"] for r in rows]
-    medians = [r["median"] for r in rows]
-    outliers = [r["outliers_removed"] for r in rows]
-
-    ax.plot(index, medians, marker="o", color=_CLEAN_COLOR, lw=1.2,
-            label="block median")
-    ax.set_xlabel("block index")
-    ax.set_ylabel("block median [V]")
-    ax.grid(True, alpha=0.3)
-
-    twin = ax.twinx()
-    twin.bar(index, outliers, width=0.55, color=_REMOVED_COLOR, alpha=0.18,
-             label="outliers removed")
-    twin.set_ylabel("outliers removed")
-    twin.set_ylim(0, max(max(outliers) * 1.35, 1.0))
-
-    handles = ax.get_lines() + twin.containers
-    labels = [h.get_label() for h in handles]
-    ax.legend(handles, labels, loc="upper right", framealpha=0.9)
-    ax.set_title("per-block medians (bars: outliers removed)")
-
-
-def _panel_removals(ax, t: np.ndarray, removed: np.ndarray) -> None:
-    duration = float(t[-1]) if t.size else 0.0
-    bins = max(10, min(120, int(round(duration / 10.0)) or 10))
-    counts, edges = np.histogram(t[removed], bins=bins, range=(0.0, duration))
-    ax.bar(edges[:-1], counts, width=np.diff(edges), align="edge",
-           color=_REMOVED_COLOR, alpha=0.75)
-    ax.set_xlabel("time [s]")
-    ax.set_ylabel(f"samples removed (per {duration / bins:.0f} s)")
-    ax.grid(True, alpha=0.3)
-    ax.set_title(f"removals over time ({int(removed.sum())} total)")
-
-
-def plot_summary(directory: Path, t: np.ndarray, removed: np.ndarray,
-                 sorted_values: np.ndarray | None,
-                 medians: list[dict[str, float]] | None) -> Path:
-    """Compact panels: sorted curve, per-block medians, removals over time."""
-    path = directory / "run_summary.png"
-
-    have_sorted = sorted_values is not None and sorted_values.size > 0
-    have_csv = bool(medians)
-
-    fig = plt.figure(figsize=(14, 9), dpi=DPI)
-    if have_sorted and have_csv:
-        grid = fig.add_gridspec(2, 2, height_ratios=[1.15, 1.0])
-        axes = {
-            "sorted": fig.add_subplot(grid[0, :]),
-            "blocks": fig.add_subplot(grid[1, 0]),
-            "removals": fig.add_subplot(grid[1, 1]),
-        }
-    elif have_sorted or have_csv:
-        grid = fig.add_gridspec(2, 1, height_ratios=[1.15, 1.0])
-        top = "sorted" if have_sorted else "blocks"
-        axes = {
-            top: fig.add_subplot(grid[0, 0]),
-            "removals": fig.add_subplot(grid[1, 0]),
-        }
-    else:
-        grid = fig.add_gridspec(1, 1)
-        axes = {"removals": fig.add_subplot(grid[0, 0])}
-
-    if have_sorted:
-        _panel_sorted(axes["sorted"], sorted_values)
-    if have_csv:
-        _panel_blocks(axes["blocks"], medians)
-    _panel_removals(axes["removals"], t, removed)
-
-    fig.suptitle(f"{directory.name}: run summary "
-                 f"({t.size} samples, {int(removed.sum())} replaced)")
-    fig.tight_layout(rect=(0, 0, 1, 0.97))
-    fig.savefig(path, dpi=DPI)
-    plt.close(fig)
-    return path
+def read_csv(path: Path) -> list[dict]:
+    with path.open() as handle:
+        return list(csv.DictReader(handle))
 
 
 def main(argv: list[str]) -> int:
-    directory = Path(argv[1] if len(argv) > 1 else ".").expanduser()
-    if not directory.is_dir():
-        print(f"plot_run: {directory} is not a directory", file=sys.stderr)
-        return 2
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("run_dir", nargs="?", default=".")
+    ap.add_argument("--out")
+    args = ap.parse_args(argv[1:])
 
-    raw_path = directory / "raw.bin"
-    filtered_path = directory / "filtered.bin"
-    sorted_path = directory / "sorted.bin"
-    medians_path = directory / "medians.csv"
+    run_dir = Path(args.run_dir).expanduser()
+    out_dir = Path(args.out).expanduser() if args.out else run_dir
+    out_dir.mkdir(parents=True, exist_ok=True)
 
-    for required in (raw_path, filtered_path):
-        if not required.is_file():
-            print(f"plot_run: {required} is missing (required)", file=sys.stderr)
-            return 2
-
-    raw = load_floats(raw_path)
-    filtered = load_floats(filtered_path)
+    raw = np.fromfile(run_dir / "raw.bin", dtype="<f4")
+    filtered = np.fromfile(run_dir / "filtered.bin", dtype="<f4")
+    if raw.size == 0:
+        raise SystemExit("plot_run: raw.bin is missing or empty")
     if raw.size != filtered.size:
-        print(f"plot_run: raw.bin has {raw.size} samples but filtered.bin has "
-              f"{filtered.size}; using the shorter overlap", file=sys.stderr)
-        shared = min(raw.size, filtered.size)
-        raw, filtered = raw[:shared], filtered[:shared]
+        raise SystemExit(f"plot_run: raw.bin has {raw.size} samples, "
+                         f"filtered.bin has {filtered.size}")
 
-    n = int(raw.size)
-    t = np.arange(n, dtype=np.float64) / SAMPLE_RATE_HZ
-    duration = n / SAMPLE_RATE_HZ
-    removed = raw != filtered
-    differing = int(removed.sum())
+    n = raw.size
+    t = np.arange(n) / RATE_HZ
+    changed = raw.view("u4") != filtered.view("u4")
+    zoom_starts = busiest(changed, int(2.0 * RATE_HZ), 3)
 
     sorted_values = None
-    skipped: list[str] = []
-    if sorted_path.is_file():
-        sorted_values = load_floats(sorted_path)
-    else:
-        skipped.append("sorted.bin")
+    sorted_ok = None
+    if (run_dir / "sorted.bin").exists():
+        sorted_values = np.fromfile(run_dir / "sorted.bin", dtype="<f4")
+        same_values = np.array_equal(np.sort(raw), sorted_values)
+        nondecreasing = bool(np.all(np.diff(sorted_values) >= 0))
+        sorted_ok = (same_values and nondecreasing)
+    medians = read_csv(run_dir / "medians.csv") if (run_dir / "medians.csv").exists() else []
 
-    medians = None
-    if medians_path.is_file():
-        medians = load_medians(medians_path)
-    else:
-        skipped.append("medians.csv")
-
-    written = [
-        plot_overview(directory, t, raw, filtered, removed),
-        plot_zoom(directory, t, raw, filtered, removed),
-        plot_summary(directory, t, removed, sorted_values, medians),
-    ]
-
-    print(f"directory  : {directory.resolve()}")
-    print(f"samples    : {n}")
-    print(f"duration   : {duration:.3f} s ({SAMPLE_RATE_HZ:g} Hz)")
-    print(f"differing  : {differing} (raw != filtered)")
+    print(f"directory  : {run_dir}")
+    print(f"samples    : {n}  ({n / RATE_HZ:.1f} s at {RATE_HZ:.0f} Hz)")
+    print(f"differing  : {int(changed.sum())} (raw != filtered)")
     if sorted_values is not None:
-        print(f"sorted.bin : {sorted_values.size} samples, "
-              f"global median = {float(np.median(sorted_values)):.9g}")
-    if medians is not None:
-        print(f"medians.csv: {len(medians)} block(s)")
-        for row in medians:
-            print(f"  block {row['block_index']}: samples={row['samples']} "
-                  f"median={row['median']:.9g} "
-                  f"outliers_removed={row['outliers_removed']}")
-        print(f"  sum of block outliers = "
-              f"{sum(r['outliers_removed'] for r in medians)}")
-    if skipped:
-        print(f"skipped    : {', '.join(skipped)} (not present)")
-    for path in written:
-        print(f"wrote      : {path}")
+        print(f"sorted.bin : {sorted_values.size} samples, median {sorted_values[n // 2]:.9g}, "
+              f"non-decreasing {nondecreasing}, same values {same_values}")
+    for row in medians:
+        print(f"  block {row['block_index']}: {row['samples']} samples, "
+              f"median {float(row['median']):.9g}, replaced {row['outliers_removed']}")
+
+    # --- 1. the whole recording, with an envelope so spikes stay visible ------
+    centres, lo, hi = envelope(raw)
+    fig, ax = plt.subplots(figsize=(15, 5.6), dpi=DPI)
+    ax.fill_between(centres / RATE_HZ, lo, hi, color=NOISY, alpha=0.55,
+                    linewidth=0, label="received (min–max per 0.4 s)")
+    ax.plot(t, filtered, color=FILTER, linewidth=1.3, label="filtered (service output)")
+    ax.plot(t[changed], raw[changed], "o", color=FLAG, markersize=2.6, alpha=0.6,
+            linestyle="none", label=f"samples replaced ({int(changed.sum())})")
+    for start in zoom_starts:
+        ax.axvspan(start / RATE_HZ, (start + int(2.0 * RATE_HZ)) / RATE_HZ,
+                   color=FLAG, alpha=0.10, linewidth=0)
+    ax.set_xlim(0, t[-1])
+    style(ax, "voltage (V)", "time (s)")
+    ax.set_title(f"The whole recording — noisy telemetry and the filtered signal\n"
+                 f"{n} samples over {n / RATE_HZ:.0f} s at {RATE_HZ:.0f} Hz, "
+                 f"{int(changed.sum())} samples replaced", fontsize=13)
+    ax.legend(loc="upper right", framealpha=0.95, ncol=3)
+    fig.tight_layout()
+    fig.savefig(out_dir / "run_cleaned_vs_noisy.png", dpi=DPI)
+    plt.close(fig)
+
+    # --- 2. three stretches where the filter acted ---------------------------
+    fig, axes = plt.subplots(len(zoom_starts), 1, figsize=(14, 3.0 * len(zoom_starts) + 0.8),
+                             dpi=DPI, squeeze=False)
+    for ax, start in zip(axes[:, 0], zoom_starts):
+        stop = min(start + int(2.0 * RATE_HZ), n)
+        sl = slice(start, stop)
+        sel = changed[sl]
+        ax.plot(t[sl], raw[sl], "o-", color=NOISY, linewidth=0.9, markersize=3.2,
+                markerfacecolor="white", label="received")
+        ax.plot(t[sl], filtered[sl], color=FILTER, linewidth=2.0, label="filtered")
+        ax.plot(t[sl][sel], raw[sl][sel], "o", color=FLAG, markersize=9,
+                markerfacecolor="none", markeredgewidth=1.6, linestyle="none",
+                label="replaced")
+        ax.set_xlim(t[start], t[stop - 1])
+        style(ax, "voltage (V)")
+        ax.set_title(f"{t[start]:.1f}–{t[stop - 1]:.1f} s — {int(sel.sum())} samples replaced",
+                     fontsize=12.5, loc="left")
+        if start == zoom_starts[0]:
+            ax.legend(loc="upper right", ncol=3, framealpha=0.95)
+    axes[-1, 0].set_xlabel("time (s)")
+    fig.suptitle("Where the filter acted — three stretches, zoomed", fontsize=14)
+    fig.tight_layout(rect=(0, 0, 1, 0.965))
+    fig.savefig(out_dir / "run_zoom.png", dpi=DPI)
+    plt.close(fig)
+
+    # --- 3. proof of the sort ------------------------------------------------
+    if sorted_values is not None:
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 5.4), dpi=DPI)
+        ax1.plot(t, raw, color=NOISY, linewidth=0.7)
+        ax1.set_xlim(0, t[-1])
+        style(ax1, "value (as received)", "sample index → time (s)")
+        ax1.set_title("Before: the values in arrival order\n(unsorted)", fontsize=13)
+
+        ax2.plot(np.arange(n), sorted_values, color=FILTER, linewidth=1.6)
+        for value, label, colour in ((sorted_values[0], "min", NOISY),
+                                     (sorted_values[n // 2], "median", MEDIAN),
+                                     (sorted_values[-1], "max", NOISY)):
+            ax2.axhline(value, color=colour, linestyle="--", linewidth=1.2, alpha=0.9)
+            ax2.annotate(f"{label} {value:.5g}", xy=(0.015, value), xycoords=("axes fraction", "data"),
+                         va="bottom", ha="left", fontsize=11, color=colour)
+        style(ax2, "value (sorted)", "rank (0 → 59 999)")
+        ax2.set_title("After: the same values, sorted ascending\n"
+                      "non-decreasing ✓   same 60 000 values ✓", fontsize=13)
+        fig.suptitle("The sort, shown: arrival order becomes ascending order", fontsize=14)
+        fig.tight_layout(rect=(0, 0, 1, 0.94))
+        fig.savefig(out_dir / "run_sorted_proof.png", dpi=DPI)
+        plt.close(fig)
+
+    # --- 4. per-block medians and when samples were replaced ------------------
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 5.0), dpi=DPI,
+                                   gridspec_kw={"width_ratios": [1, 1.5]})
+    if medians:
+        index = [int(r["block_index"]) for r in medians]
+        med = [float(r["median"]) for r in medians]
+        rep = [int(r["outliers_removed"]) for r in medians]
+        bars = ax1.bar([f"block {i}\n({r['samples']} samples)" for i, r in zip(index, medians)],
+                       med, color=FILTER, width=0.6, alpha=0.85)
+        for bar, value, count in zip(bars, med, rep):
+            ax1.text(bar.get_x() + bar.get_width() / 2, value, f"{value:.5g} V\n{count} replaced",
+                     ha="center", va="bottom", fontsize=10)
+        ax1.set_ylim(min(med) - 0.35, max(med) + 0.55)
+        style(ax1, "block median (V)")
+        ax1.set_title("Median of each 64 KiB block", fontsize=13)
+    else:
+        ax1.text(0.5, 0.5, "medians.csv not present", ha="center", va="center",
+                 transform=ax1.transAxes)
+        ax1.set_axis_off()
+
+    ax2.plot(t, raw, color=NOISY, linewidth=0.6, alpha=0.8, label="received")
+    ax2.plot(t, filtered, color=FILTER, linewidth=1.2, label="filtered")
+    ax2.plot(t[changed], raw[changed], "|", color=FLAG, markersize=6, mew=1.0,
+             linestyle="none", label="replaced")
+    ax2.set_xlim(0, t[-1])
+    style(ax2, "voltage (V)", "time (s)")
+    ax2.set_title(f"When the filter acted — {int(changed.sum())} samples", fontsize=13)
+    ax2.legend(loc="upper right", ncol=3, framealpha=0.95)
+    fig.tight_layout()
+    fig.savefig(out_dir / "run_summary.png", dpi=DPI)
+    plt.close(fig)
+
+    for name in ("run_cleaned_vs_noisy.png", "run_zoom.png",
+                 "run_sorted_proof.png", "run_summary.png"):
+        print(f"wrote      : {out_dir / name}")
     return 0
 
 

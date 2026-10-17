@@ -4,20 +4,20 @@
 Usage:
     uv run python tools/plot_vs_truth.py RUN_DIR [--out DIR] [--npz PATH]
 
-RUN_DIR holds the files the board's client wrote (raw.bin, filtered.bin,
-optional sorted.bin / medians.csv). The script finds which run and channel of
-`battery_sensor_dataset.npz` the run came from by matching raw.bin bit for bit,
-then uses that run's `clean` series as the answer key.
+RUN_DIR holds the files the board's client wrote (raw.bin, filtered.bin). The
+script finds which run and channel of `battery_sensor_dataset.npz` the run came
+from by matching raw.bin bit for bit, and uses that run's `clean` series as the
+answer key.
 
-Note the channel order trap: the .npz tensor stores
-[time, current, voltage, temperature], while the interleaved `.bin` exports are
-[time, voltage, current, temperature]. Matching by value sidesteps it entirely.
+Channel-order trap: the .npz tensor stores [time, current, voltage, temperature],
+while the interleaved `.bin` exports are [time, voltage, current, temperature].
+Matching by value sidesteps it.
 
 Figures written into OUT (default: RUN_DIR):
-    truth_full.png          the whole recording: clean, noisy, filtered + metrics
-    truth_zooms.png         three heavy-corruption windows, zoomed
-    truth_spike_closeup.png the largest spike, sample by sample
-    truth_error.png         error before/after, and the filter's hit/miss split
+    truth_full.png     the whole recording: clean, received, filtered + metrics
+    truth_zooms.png    the three busiest stretches, zoomed
+    truth_error.png    error before/after, and the same error over time
+    truth_columns.png  the block medians of all four columns of the recording
 """
 
 from __future__ import annotations
@@ -34,11 +34,29 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 
 RATE_HZ = 100.0
-DPI = 150
-CLEAN = "#111111"      # answer key
-NOISY = "#9aa0a6"      # the signal as received
-FILTER = "#1a73e8"     # what the service produced
-FLAG = "#d93025"       # samples the filter replaced
+DPI = 200
+CLEAN = "#111111"
+NOISY = "#8d949c"
+FILTER = "#1558d6"
+FLAG = "#d93025"
+MEDIAN = "#188038"
+
+UNITS = ("s", "A", "V", "K")
+NPZ_CHANNELS = ("time", "current", "voltage", "temperature")
+BLOCKS = (16384, 16384, 16384, 10848)
+
+plt.rcParams.update({
+    "font.size": 12,
+    "axes.titlesize": 14,
+    "axes.labelsize": 12.5,
+    "legend.fontsize": 10.5,
+    "xtick.labelsize": 10.5,
+    "ytick.labelsize": 10.5,
+    "axes.linewidth": 0.9,
+    "axes.edgecolor": "#444444",
+    "figure.facecolor": "white",
+    "savefig.facecolor": "white",
+})
 
 NPZ_CANDIDATES = (
     "data/artifacts/dataset/battery_sensor_dataset.npz",
@@ -57,12 +75,10 @@ def find_npz(explicit: str | None) -> Path:
         path = Path(candidate)
         if path.exists():
             return path
-    raise SystemExit("plot_vs_truth: cannot find battery_sensor_dataset.npz; "
-                     "pass --npz PATH")
+    raise SystemExit("plot_vs_truth: cannot find battery_sensor_dataset.npz; pass --npz PATH")
 
 
 def match_run(npz, raw: np.ndarray) -> tuple[int, int]:
-    """Return (run index, channel index) whose noisy column equals raw bit for bit."""
     noisy = npz["noisy"]
     for run in range(noisy.shape[0]):
         for channel in range(noisy.shape[2]):
@@ -72,24 +88,26 @@ def match_run(npz, raw: np.ndarray) -> tuple[int, int]:
                      "dataset; is this the recording the run used?")
 
 
-def style(ax, ylabel: str | None = None) -> None:
-    ax.grid(True, color="#d0d0d0", linewidth=0.6, alpha=0.8)
+def style(ax, ylabel: str | None = None, xlabel: str | None = None) -> None:
+    ax.grid(True, color="#d8d8d8", linewidth=0.7)
     ax.set_axisbelow(True)
+    for side in ("top", "right"):
+        ax.spines[side].set_visible(False)
     if ylabel:
         ax.set_ylabel(ylabel)
+    if xlabel:
+        ax.set_xlabel(xlabel)
 
 
-def metrics(err: np.ndarray) -> dict:
-    return {
-        "rmse": float(np.sqrt((err * err).mean())),
-        "mae": float(err.mean()),
-        "p99": float(np.percentile(err, 99)),
-        "max": float(err.max()),
-    }
+def envelope(x: np.ndarray, bins: int = 1500):
+    edges = np.linspace(0, x.size, bins + 1).astype(int)
+    centres = (edges[:-1] + edges[1:]) / 2.0
+    lo = np.array([x[a:b].min() for a, b in zip(edges[:-1], edges[1:])])
+    hi = np.array([x[a:b].max() for a, b in zip(edges[:-1], edges[1:])])
+    return centres, lo, hi
 
 
-def busiest_windows(flags: np.ndarray, width: int, count: int) -> list[int]:
-    """Start indices of the `count` busiest non-overlapping windows of `flags`."""
+def busiest(flags: np.ndarray, width: int, count: int) -> list[int]:
     density = np.convolve(flags.astype(np.int32), np.ones(width, np.int32), "valid")
     order = np.argsort(density)[::-1]
     picked: list[int] = []
@@ -101,6 +119,16 @@ def busiest_windows(flags: np.ndarray, width: int, count: int) -> list[int]:
         if len(picked) == count:
             break
     return sorted(picked)
+
+
+def block_medians(x: np.ndarray) -> list[float]:
+    """The service's definition: element n/2 of each sorted block."""
+    out, at = [], 0
+    for size in BLOCKS:
+        chunk = np.sort(x[at:at + size])
+        out.append(float(chunk[chunk.size // 2]))
+        at += size
+    return out
 
 
 def main(argv: list[str]) -> int:
@@ -121,161 +149,155 @@ def main(argv: list[str]) -> int:
 
     npz = np.load(find_npz(args.npz))
     run, channel = match_run(npz, raw)
-    truth = npz["clean"][run, :, channel].astype(np.float64)
-    mask = npz["outlier_mask"][run, :, channel]
     run_id = str(npz["run_ids"][run])
-    names = ["time", "current", "voltage", "temperature"]
+    truth_col = npz["clean"][run, :, channel].astype(np.float64)
     n = raw.size
     t = np.arange(n) / RATE_HZ
 
-    grey_gap = raw.view("u4") != filtered.view("u4")      # the filter changed these
-    err_raw = np.abs(raw.astype(np.float64) - truth)
-    err_flt = np.abs(filtered.astype(np.float64) - truth)
-    m_raw, m_flt = metrics(err_raw), metrics(err_flt)
-    tp = int((grey_gap & mask).sum())
-    fp = int((grey_gap & ~mask).sum())
-    fn = int((~grey_gap & mask).sum())
-    precision = 100.0 * tp / max(tp + fp, 1)
-    recall = 100.0 * tp / max(tp + fn, 1)
-    f1 = 200.0 * tp / max(2 * tp + fp + fn, 1)
-    noise = float(np.median(np.abs(raw.astype(np.float64) - truth)))
+    replaced = raw.view("u4") != filtered.view("u4")
+    err_raw = np.abs(raw.astype(np.float64) - truth_col)
+    err_flt = np.abs(filtered.astype(np.float64) - truth_col)
+    rmse = lambda e: float(np.sqrt((e * e).mean()))
+    r_raw, r_flt = rmse(err_raw), rmse(err_flt)
+    mae_raw, mae_flt = float(err_raw.mean()), float(err_flt.mean())
+    p99_raw, p99_flt = float(np.percentile(err_raw, 99)), float(np.percentile(err_flt, 99))
+    gain = r_raw / r_flt
+    noise = float(np.median(err_raw))
 
     print(f"directory : {run_dir}")
-    print(f"matched   : run '{run_id}', channel {channel} ({names[channel]})")
+    print(f"matched   : run '{run_id}', channel {channel} ({NPZ_CHANNELS[channel]})")
     print(f"samples   : {n}  ({n / RATE_HZ:.1f} s at {RATE_HZ:.0f} Hz)")
-    print(f"noise     : median |raw - clean| = {noise:.6f} V "
-          f"(largest spike {err_raw.max():.3f} V = {err_raw.max() / max(noise, 1e-12):.0f}x)")
-    print(f"raw       : RMSE {m_raw['rmse']:.6f}  MAE {m_raw['mae']:.6f}  "
-          f"p99 {m_raw['p99']:.6f}  max {m_raw['max']:.6f}")
-    print(f"filtered  : RMSE {m_flt['rmse']:.6f}  MAE {m_flt['mae']:.6f}  "
-          f"p99 {m_flt['p99']:.6f}  max {m_flt['max']:.6f}")
-    print(f"gain      : RMSE improved {m_raw['rmse'] / m_flt['rmse']:.1f}x, "
-          f"{int((err_flt < err_raw).sum())} of {n} samples made closer")
-    print(f"decisions : {int(grey_gap.sum())} replaced -> hits {tp}, false {fp}, "
-          f"missed {fn}  precision {precision:.1f}%  recall {recall:.1f}%  F1 {f1:.1f}%")
+    print(f"noise     : median |received - clean| = {noise:.6f} V, "
+          f"largest excursion {err_raw.max():.3f} V")
+    print(f"received  : RMSE {r_raw:.6f}  MAE {mae_raw:.6f}  p99 {p99_raw:.6f}")
+    print(f"filtered  : RMSE {r_flt:.6f}  MAE {mae_flt:.6f}  p99 {p99_flt:.6f}")
+    print(f"gain      : RMSE {gain:.2f}x better, {int((err_flt < err_raw).sum())} of {n} samples closer")
 
-    zooms = busiest_windows(grey_gap, int(2.0 * RATE_HZ), 3)
-    spike = int(np.argmax(err_raw))
+    zoom_starts = busiest(replaced, int(2.0 * RATE_HZ), 3)
 
     # --- 1. the whole recording ------------------------------------------------
-    fig, ax = plt.subplots(figsize=(15, 5.2), dpi=DPI)
-    ax.plot(t, truth, color=CLEAN, linewidth=0.8, label="clean (ground truth)")
-    ax.plot(t, raw, color=NOISY, linewidth=0.5, alpha=0.7, label="noisy (received)")
-    ax.plot(t, filtered, color=FILTER, linewidth=0.7, label="filtered (service)")
-    ax.plot(t[grey_gap], raw[grey_gap], "o", color=FLAG, markersize=1.6,
-            linestyle="none", label=f"replaced ({int(grey_gap.sum())})")
-    for start in zooms:
+    centres, lo, hi = envelope(raw)
+    fig, ax = plt.subplots(figsize=(15, 5.8), dpi=DPI)
+    ax.plot(t, truth_col, color=CLEAN, linewidth=1.1, label="clean (ground truth)")
+    ax.fill_between(centres / RATE_HZ, lo, hi, color=NOISY, alpha=0.45, linewidth=0,
+                    label="received (min–max per 0.4 s)")
+    ax.plot(t, filtered, color=FILTER, linewidth=1.4, label="filtered (service output)")
+    for start in zoom_starts:
         ax.axvspan(start / RATE_HZ, (start + int(2.0 * RATE_HZ)) / RATE_HZ,
                    color=FLAG, alpha=0.10, linewidth=0)
     ax.set_xlim(0, t[-1])
-    ax.set_xlabel("time (s)")
-    style(ax, "voltage (V)")
-    ax.set_title(f"{run_id} — {names[channel]}, whole recording "
-                 f"({n} samples, {n / RATE_HZ:.0f} s)", fontsize=11)
-    box = (f"RMSE  raw {m_raw['rmse'] * 1000:.2f} mV  ->  filtered {m_flt['rmse'] * 1000:.2f} mV"
-           f"   ({m_raw['rmse'] / m_flt['rmse']:.1f}x better)\n"
-           f"MAE   raw {m_raw['mae'] * 1000:.2f} mV  ->  filtered {m_flt['mae'] * 1000:.2f} mV\n"
-           f"spikes replaced: {int(grey_gap.sum())}   precision {precision:.0f}%  recall {recall:.0f}%")
-    ax.text(0.012, 0.03, box, transform=ax.transAxes, fontsize=8.5, va="bottom",
-            family="monospace", bbox=dict(boxstyle="round,pad=0.4", facecolor="white",
-                                          edgecolor="#bbbbbb", alpha=0.9))
-    ax.legend(loc="upper right", fontsize=8, framealpha=0.9, ncol=4)
+    style(ax, "voltage (V)", "time (s)")
+    ax.set_title("Against ground truth — the whole recording\n"
+                 f"{run_id}, {n} samples, {n / RATE_HZ:.0f} s at {RATE_HZ:.0f} Hz", fontsize=13)
+    box = (f"RMSE   received {r_raw * 1000:6.2f} mV   ->   filtered {r_flt * 1000:6.2f} mV"
+           f"   ({gain:.1f}x better)\n"
+           f"MAE    received {mae_raw * 1000:6.2f} mV   ->   filtered {mae_flt * 1000:6.2f} mV\n"
+           f"p99    received {p99_raw * 1000:6.2f} mV   ->   filtered {p99_flt * 1000:6.2f} mV")
+    ax.text(0.012, 0.035, box, transform=ax.transAxes, fontsize=10.5, va="bottom",
+            family="monospace",
+            bbox=dict(boxstyle="round,pad=0.45", facecolor="white",
+                      edgecolor="#bbbbbb", alpha=0.95))
+    ax.legend(loc="upper right", ncol=3, framealpha=0.95)
     fig.tight_layout()
     fig.savefig(out_dir / "truth_full.png", dpi=DPI)
     plt.close(fig)
 
-    # --- 2. the three busiest windows, zoomed ---------------------------------
-    fig, axes = plt.subplots(len(zooms), 1, figsize=(14, 2.6 * len(zooms) + 0.6),
+    # --- 2. the three busiest stretches --------------------------------------
+    fig, axes = plt.subplots(len(zoom_starts), 1, figsize=(14, 3.0 * len(zoom_starts) + 0.9),
                              dpi=DPI, squeeze=False)
-    for ax, start in zip(axes[:, 0], zooms):
+    for ax, start in zip(axes[:, 0], zoom_starts):
         stop = min(start + int(2.0 * RATE_HZ), n)
         sl = slice(start, stop)
-        ax.plot(t[sl], truth[sl], color=CLEAN, linewidth=1.6, label="clean (ground truth)")
-        ax.plot(t[sl], raw[sl], "o-", color=NOISY, linewidth=0.8, markersize=2.6,
-                markerfacecolor="white", label="noisy (received)")
-        ax.plot(t[sl], filtered[sl], color=FILTER, linewidth=1.5, label="filtered (service)")
-        sel = grey_gap[sl]
-        ax.plot(t[sl][sel], raw[sl][sel], "o", color=FLAG, markersize=7,
-                markerfacecolor="none", markeredgewidth=1.2, linestyle="none",
+        sel = replaced[sl]
+        ax.plot(t[sl], truth_col[sl], color=CLEAN, linewidth=2.2, label="clean (truth)")
+        ax.plot(t[sl], raw[sl], "o-", color=NOISY, linewidth=0.9, markersize=3.2,
+                markerfacecolor="white", label="received")
+        ax.plot(t[sl], filtered[sl], color=FILTER, linewidth=2.0, label="filtered")
+        ax.plot(t[sl][sel], raw[sl][sel], "o", color=FLAG, markersize=9,
+                markerfacecolor="none", markeredgewidth=1.6, linestyle="none",
                 label="replaced")
         ax.set_xlim(t[start], t[stop - 1])
         style(ax, "voltage (V)")
-        ax.set_title(f"{t[start]:.1f}–{t[stop - 1]:.1f} s — "
-                     f"{int(sel.sum())} samples replaced", fontsize=10, loc="left")
-        if start == zooms[0]:
-            ax.legend(loc="upper right", fontsize=8, ncol=4, framealpha=0.9)
+        ax.set_title(f"{t[start]:.1f}–{t[stop - 1]:.1f} s — {int(sel.sum())} samples replaced",
+                     fontsize=12.5, loc="left")
+        if start == zoom_starts[0]:
+            ax.legend(loc="upper right", ncol=4, framealpha=0.95)
     axes[-1, 0].set_xlabel("time (s)")
-    fig.suptitle(f"{run_id} — the three busiest stretches, zoomed", fontsize=12)
-    fig.tight_layout(rect=(0, 0, 1, 0.97))
+    fig.suptitle("The busiest stretches — received, filtered and the truth they track",
+                 fontsize=14)
+    fig.tight_layout(rect=(0, 0, 1, 0.965))
     fig.savefig(out_dir / "truth_zooms.png", dpi=DPI)
     plt.close(fig)
 
-    # --- 3. the largest spike, sample by sample -------------------------------
-    half = 10
-    lo, hi = max(0, spike - half), min(n, spike + half + 1)
-    sl = slice(lo, hi)
-    fig, ax = plt.subplots(figsize=(11, 4.8), dpi=DPI)
-    ax.plot(t[sl], truth[sl], color=CLEAN, linewidth=1.8, marker="s", markersize=3.5,
-            label="clean (ground truth)")
-    ax.plot(t[sl], raw[sl], "o", color=NOISY, markersize=7, markerfacecolor="white",
-            markeredgewidth=1.4, label="noisy sample (received)")
-    ax.plot(t[sl], filtered[sl], color=FILTER, linewidth=1.6, marker="o", markersize=3.5,
-            label="filtered sample (service)")
-    ax.annotate(f"received {raw[spike]:.4f} V\nclean    {truth[spike]:.4f} V\n"
-                f"filtered {filtered[spike]:.4f} V",
-                xy=(t[spike], raw[spike]), xytext=(8, 14), textcoords="offset points",
-                fontsize=9, family="monospace",
-                bbox=dict(boxstyle="round,pad=0.35", facecolor="white", edgecolor=FLAG),
-                arrowprops=dict(arrowstyle="->", color=FLAG, linewidth=1.1))
-    ax.axvspan(t[spike] - 0.5 / RATE_HZ, t[spike] + 0.5 / RATE_HZ,
-               color=FLAG, alpha=0.12, linewidth=0)
-    ax.set_xlim(t[lo], t[hi - 1])
-    ax.set_xlabel("time (s)")
-    style(ax, "voltage (V)")
-    ax.set_title(f"Largest spike, sample by sample — the window around "
-                 f"{t[spike]:.2f} s (median window 9, threshold 4)", fontsize=11)
-    ax.legend(loc="best", fontsize=8.5, framealpha=0.9)
-    fig.tight_layout()
-    fig.savefig(out_dir / "truth_spike_closeup.png", dpi=DPI)
-    plt.close(fig)
-
-    # --- 4. error before/after, and what the decisions were -------------------
-    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5), dpi=DPI,
-                                   gridspec_kw={"width_ratios": [1.35, 1]})
+    # --- 3. error before and after -------------------------------------------
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 5.2), dpi=DPI,
+                                   gridspec_kw={"width_ratios": [1.15, 1]})
     positive = err_raw[err_raw > 0]
-    lo = max(float(positive.min()) if positive.size else 1e-5, 1e-5)
-    bins = np.logspace(np.log10(lo), np.log10(float(err_raw.max())), 60)
-    ax1.hist(np.clip(err_raw, 1e-5, None), bins=bins, color=NOISY, alpha=0.75,
-             label=f"raw: RMSE {m_raw['rmse'] * 1000:.2f} mV")
-    ax1.hist(np.clip(err_flt, 1e-5, None), bins=bins, color=FILTER, alpha=0.75,
-             label=f"filtered: RMSE {m_flt['rmse'] * 1000:.2f} mV")
+    lo_e = max(float(positive.min()) if positive.size else 1e-5, 1e-5)
+    bins = np.logspace(np.log10(lo_e), np.log10(float(err_raw.max())), 70)
+    ax1.hist(np.clip(err_raw, 1e-5, None), bins=bins, color=NOISY, alpha=0.8,
+             label=f"received — RMSE {r_raw * 1000:.2f} mV")
+    ax1.hist(np.clip(err_flt, 1e-5, None), bins=bins, color=FILTER, alpha=0.8,
+             label=f"filtered — RMSE {r_flt * 1000:.2f} mV")
     ax1.set_xscale("log")
     ax1.set_yscale("log")
-    ax1.set_xlabel("|error| against the clean signal (V, log scale)")
-    style(ax1, "samples (log scale)")
-    ax1.set_title("Error distribution before and after filtering", fontsize=11)
-    ax1.legend(fontsize=9, framealpha=0.9)
+    style(ax1, "samples (log)", "|error| against the clean signal (V, log)")
+    ax1.set_title("How far each sample sits from the truth", fontsize=13)
+    ax1.legend(framealpha=0.95)
 
-    labels = ["hits\n(true outlier, replaced)", "false flags\n(clean, replaced)",
-              "missed\n(true outlier, kept)"]
-    values = [tp, fp, fn]
-    colours = ["#188038", FLAG, "#f9ab00"]
-    bars = ax2.bar(labels, values, color=colours, width=0.62)
-    for bar, value in zip(bars, values):
-        ax2.text(bar.get_x() + bar.get_width() / 2, value, str(value),
-                 ha="center", va="bottom", fontsize=10, fontweight="bold")
-    ax2.set_ylim(0, max(values) * 1.18)
-    style(ax2, "samples")
-    ax2.set_title(f"Decisions vs the injected-outlier mask\n"
-                  f"precision {precision:.0f}%   recall {recall:.0f}%   F1 {f1:.0f}%",
-                  fontsize=11)
-    fig.suptitle(f"{run_id} — {names[channel]}: what the filter achieved", fontsize=12)
+    labels = ["median", "p90", "p99", "p99.9", "largest"]
+    qs = [50, 90, 99, 99.9]
+    raw_bars = [float(np.percentile(err_raw, q)) for q in qs] + [float(err_raw.max())]
+    flt_bars = [float(np.percentile(err_flt, q)) for q in qs] + [float(err_flt.max())]
+    x = np.arange(len(labels))
+    ax2.bar(x - 0.19, raw_bars, 0.36, color=NOISY, label="received")
+    ax2.bar(x + 0.19, flt_bars, 0.36, color=FILTER, label="filtered")
+    ax2.set_yscale("log")
+    ax2.set_xticks(x, labels)
+    for xi, r, f in zip(x, raw_bars, flt_bars):
+        ax2.text(xi - 0.19, r, f"{r * 1000:.1f}", ha="center", va="bottom", fontsize=9)
+        ax2.text(xi + 0.19, f, f"{f * 1000:.1f}", ha="center", va="bottom", fontsize=9)
+    ax2.set_ylim(min(flt_bars) * 0.35, max(raw_bars) * 3.2)
+    style(ax2, "error (V, log)", "error percentile — labels in mV")
+    ax2.set_title(f"Error profile, {gain:.1f}x better on RMSE", fontsize=13)
+    ax2.legend(framealpha=0.95)
+    fig.suptitle("What the filter bought", fontsize=14)
     fig.tight_layout(rect=(0, 0, 1, 0.94))
     fig.savefig(out_dir / "truth_error.png", dpi=DPI)
     plt.close(fig)
 
-    for name in ("truth_full.png", "truth_zooms.png",
-                 "truth_spike_closeup.png", "truth_error.png"):
+    # --- 4. every column of the recording ------------------------------------
+    fig, axes = plt.subplots(2, 2, figsize=(14, 8.4), dpi=DPI)
+    print("\nblock medians per column (the service's definition: element n/2 of a sorted block)")
+    print(f"{'column':12s} {'unit':5s} " + " ".join(f"{'block ' + str(i):>14s}" for i in range(4))
+          + f" {'global':>14s}")
+    for ax, column in zip(axes.ravel(), range(npz["noisy"].shape[2])):
+        series = npz["noisy"][run, :, column].astype(np.float64)
+        meds = block_medians(series)
+        glob = float(np.sort(series[:sum(BLOCKS)])[sum(BLOCKS) // 2])
+        bars = ax.bar([f"block {i}\n{size} samples" for i, size in enumerate(BLOCKS)],
+                      meds, color=FILTER, width=0.6, alpha=0.85)
+        for bar, value in zip(bars, meds):
+            ax.text(bar.get_x() + bar.get_width() / 2, value, f"{value:.5g}",
+                    ha="center", va="bottom", fontsize=10)
+        ax.axhline(glob, color=MEDIAN, linestyle="--", linewidth=1.4,
+                   label=f"whole-recording median {glob:.5g}")
+        span = max(meds) - min(meds)
+        ax.set_ylim(min(meds) - 0.25 * span - 0.02, max(meds) + 0.45 * span + 0.02)
+        style(ax, f"{NPZ_CHANNELS[column]} ({UNITS[column]})")
+        ax.set_title(f"{NPZ_CHANNELS[column]} — median per block", fontsize=12.5)
+        ax.legend(fontsize=9.5, loc="upper right", framealpha=0.95)
+        pre = "     "
+        print(f"{pre}{NPZ_CHANNELS[column]:12s} {UNITS[column]:5s} "
+              + " ".join(f"{v:14.7g}" for v in meds) + f" {glob:14.7g}")
+    fig.suptitle(f"All four columns of {run_id}\n"
+                 "computed from the same recording — the board run processed voltage "
+                 "(one channel per run)", fontsize=13)
+    fig.tight_layout(rect=(0, 0, 1, 0.93))
+    fig.savefig(out_dir / "truth_columns.png", dpi=DPI)
+    plt.close(fig)
+
+    for name in ("truth_full.png", "truth_zooms.png", "truth_error.png", "truth_columns.png"):
         print(f"wrote     : {out_dir / name}")
     return 0
 
