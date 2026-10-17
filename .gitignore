@@ -28,6 +28,7 @@ data/artifacts/dataset/
 /RT-MOMS/tests/test_mergesort
 /RT-MOMS/tests/test_median
 /RT-MOMS/tests/test_shared_memory
+/RT-MOMS/tests/test_kpi
 /RT-MOMS/tests/sensor_demo
 /RT-MOMS/tests/loader_demo
 /RT-MOMS/tests/pipeline_demo
@@ -50,6 +51,7 @@ data/artifacts/dataset/
 /RT-MOMS/app/test_mergesort
 /RT-MOMS/app/test_median
 /RT-MOMS/app/test_shared_memory
+/RT-MOMS/app/test_kpi
 /RT-MOMS/app/sensor_demo
 /RT-MOMS/app/loader_demo
 /RT-MOMS/app/pipeline_demo
