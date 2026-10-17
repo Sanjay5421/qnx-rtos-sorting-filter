@@ -113,12 +113,12 @@ your PC (the console is the interface, and ssh is not usable in this image).
 copy them:
 
 ```sh
-mkdir -p /tmp/mnt                  # / is read-only; a directory in RAM is a fine mount point
+mkdir -p /var/mnt                  # /var is a real filesystem; /tmp cannot hold directories
 ls /dev/sd*                        # the card: /dev/sd0, first partition /dev/sd0t1
-mount -t dos /dev/sd0t1 /tmp/mnt   # use the partition the listing actually showed
-cp raw.bin filtered.bin sorted.bin medians.csv /tmp/mnt/
+mount -t dos /dev/sd0t1 /var/mnt   # use the partition the listing actually showed
+cp raw.bin filtered.bin sorted.bin medians.csv /var/mnt/
 sync
-umount /tmp/mnt
+umount /var/mnt
 ```
 
 Then `shutdown`, pull the card, and plug it into the PC: the four files are in the
@@ -132,11 +132,11 @@ repeated. Run the client *from the mounted card* so it writes straight there:
 cd /tmp
 sortmed-server &
 waitfor /dev/shmem/sortmed-results
-mkdir -p /tmp/mnt
-mount -t dos /dev/sd0t1 /tmp/mnt
-cd /tmp/mnt
+mkdir -p /var/mnt
+mount -t dos /dev/sd0t1 /var/mnt
+cd /var/mnt
 sortmed-client /data/bin/Chen2020_c1_T25_discharge.bin interleaved voltage 100
-sync ; cd / ; umount /tmp/mnt
+sync ; cd / ; umount /var/mnt
 ```
 
 Notes that matter:
@@ -148,8 +148,11 @@ Notes that matter:
   while it is mounted loses the writes, or worse, damages the filesystem.
 - **Mounting is safe while the system runs**: the image is loaded into RAM at boot,
   so nothing on the board is using the card.
-- `/tmp/mnt` is just a mount point; the card's contents appear under it, and `/tmp`
-  itself still behaves as a RAM disk.
+- **Why not `/tmp`**: `/tmp` is a symlink to `/dev/shmem`, and shmem holds flat
+  objects only — `mkdir` there answers `Function not implemented`. `/var/mnt`
+  works because the startup mounts a 16 MB RAM filesystem on `/var`. If `/var/mnt`
+  cannot be created, check `df` for another writable filesystem and put the mount
+  point there.
 - The files are 240 000 B each (three of them) plus a 152-byte CSV — no room
   problem on the card.
 
@@ -203,6 +206,7 @@ test_protocol             # the message definition
 | Symptom | Cause, and what to do |
 | --- | --- |
 | The output files are missing after a power cycle | They were written into `/tmp`, which is memory on this image. Section 3 mounts the SD card and copies them (or runs the client there) |
+| `mkdir: '/tmp/mnt': Function not implemented` | `/tmp` is `/dev/shmem`, and shmem has no directories. Create the mount point under `/var` instead — section 3 uses `/var/mnt` |
 | `client: name_open server (start server first)` | The server was not up yet. Start it (section 2) and re-run the client — it makes a single connection attempt, it does not retry |
 | `client: submit … rejected: …` | The server refused the block: `checksum` = it arrived damaged, `version` = the two sides disagree, `busy` = all four result slots are taken, `argument` = malformed header |
 | `client: shared-memory checksum mismatch` | The arrays changed between the server writing them and the client reading them — treat the run as invalid and run it again |
