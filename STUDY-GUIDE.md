@@ -6,9 +6,11 @@ session. The precise version of everything here is in
 [IMPLEMENTATION.md](IMPLEMENTATION.md), and the commands are in
 [REPRODUCE.md](REPRODUCE.md).
 
-**Where we are today:** M1 and M2 are built and verified on the Raspberry Pi.
-M3 is the next piece of work. The protocol half of M4 is already written and
-tested; only the wiring is missing. This file grows with the milestones.
+**Where we are today:** all four milestones are built and verified on the Raspberry
+Pi 4 — image `ifs-rpi4.bin`, SHA-256 `57637557…4588c49`. M3 and M4 ran end to end
+on 2026-10-17, once per channel for all four columns, and every channel reproduced
+the host's numbers exactly: the sorted arrays, the filtered arrays and the medians.
+[FINAL-RUN.md](FINAL-RUN.md) is the run sheet; this file is what to say about it.
 
 ---
 
@@ -396,6 +398,24 @@ and the headroom is larger still. The millisecond figures wobble between runs; t
 *plan line* is the deterministic proof that the parallel path ran, because 1 partition / 0 phases
 cannot come out of a four-worker merge.
 
+### Threads, process by process
+
+The pool belongs to whichever process calls the sort — on the board that is the
+server, so a run in flight has about six threads of ours alive:
+
+| Where | Threads | What they are |
+| --- | --- | --- |
+| The sort's pool | 4 by default (one per core; 1 / 2 / 4 measured) | Created **once** per process by `ms_pool_create`, reused for every block |
+| `sortmed-server` | 1 dispatcher + those 4 = 5 | The dispatcher sits in `MsgReceive`, unpacks each submit, then runs the sort, the filter and the checksums before pulsing the client |
+| `sortmed-client` | 1 | Main thread only: it sends the two-part IOV, blocks in `MsgReceive` for the pulse, then fetches and reads the results |
+| The rolling median filter | **0 of its own** — single-threaded | `median_filter_block()` is a plain function on the caller's thread; it adds no threads anywhere |
+
+The filter is why four workers do not make a block four times faster: a whole block
+takes **~7.3 ms** of server time, of which the sort is **0.757 ms** and the filter
+plus checksums are the rest (~6.5 ms). It is serial by nature — every output sample
+needs its neighbours — and the API already takes `left`/`right` context arrays, so
+it could be split across workers later without changing its interface.
+
 ### How the sort is tested (`tests/test_mergesort.c`, 13 tests / 578 checks)
 
 The witness is the standard library's `qsort`: sort the same numbers both ways and
@@ -438,7 +458,7 @@ T_CHECK(same_values(work, reference, n));   /* reference == qsort(input) */
 
 ---
 
-## Milestone 3 — the two programs talking *(next)*
+## Milestone 3 — the two programs talking *(built and verified on the board)*
 
 ```mermaid
 flowchart LR
@@ -474,6 +494,37 @@ flowchart LR
 - **Why a copy is filtered.** Sorting scrambles the time order, and the filter is
   entirely about time order, so the two run on different buffers.
 
+### The filter, measured (all four channels, on the board)
+
+Against the dataset's clean signal, with the default width 9 and threshold 4 σ:
+
+| Channel | RMSE before → after | Gain | Samples the filter changed | Samples that ended closer to the truth |
+| --- | --- | --- | --- | --- |
+| voltage | 23.99 → 3.89 mV | 6.17× | 1502 of 60 000 | 1464 |
+| current | — | 10.79× | 1548 of 60 000 | 1514 |
+| temperature | — | 2.00× | 1488 of 60 000 | 1458 |
+| time | 0 → 0 | already exact | **0** | 0 |
+
+Voltage in absolute terms: the noise sits at a median of 1.37 mV with spikes up to
+890 mV; the filter takes the 99th-percentile error from 43.96 mV to 5.28 mV and the
+MAE from 3.22 mV to 1.735 mV. The `time` column carries no injected corruption and
+came back **byte-identical** to the input — that is the evidence it is not
+over-eager.
+
+What it does *not* do, worth saying before it is asked:
+
+- **Bursts wider than 4 samples survive.** A 9-wide median cannot remove a fault
+  longer than (9−1)/2 = 4 samples, so the dataset's burst and dropout faults set the
+  residual worst-case error; spikes and dropout tails are cleaned.
+- **It is not a smoother.** The filtered curve still carries the ±1.4 mV broadband
+  noise by design — say "spikes and impulses removed", never "noise removed".
+- **The threshold is a deliberate trade.** From a 100-seed sweep: 4 σ misses about
+  0.3 % of injected spikes while replacing about 0.9 % of clean samples; 5 σ misses
+  about 0.9 % and replaces about 0.4 %. The default prefers catching the spike,
+  because a missed spike is the failure the filter exists to prevent, while a
+  needless replacement swaps a sample for its neighbourhood median and barely moves
+  the error.
+
 **If they ask**
 
 - *Why is the server separate from the client?* That is the assignment's
@@ -487,16 +538,38 @@ flowchart LR
 
 ---
 
-## Milestone 4 — the tap, and proving it *(protocol ready, wiring to do)*
+## Milestone 4 — the tap, and proving it *(built and verified on the board)*
 
 - The tap (`PROTO_PULSE_DONE`) is the asynchronous event the assignment asks for:
-  the server *tells* the client, and the client does not sit polling.
+  the server *tells* the client, and the client does not sit polling. It is wired
+  and it fired four times per run on all four channels.
 - The answer carries exactly what the project statement promises: the **median**,
   plus a **memory-offset descriptor** — which shared region, at which byte
   offsets, how many values, and a seal over each array — along with the window
   width, the number of outliers removed, and how long the server took.
 - That last figure, `elapsed_ns`, is what the timing half of the report is built
   from: same work, more workers, less time.
+
+**If they ask about `sigevent` — the honest answer.** The code does not use the
+`sigevent` *structure*; it uses a QNX pulse, which is the same asynchronous event in
+its connected form:
+
+- `sortmed-client` calls `name_attach(NULL, "sortmed-client", 0)` to register a
+  channel of its own, submits its work, then blocks in `MsgReceive` on that channel
+  (`client.c:198`, `client.c:116`).
+- `sortmed-server` delivers the notification with `MsgSendPulse(coid,
+  SIGEV_PULSE_PRIO_INHERIT, PROTO_PULSE_DONE, job_id)` on the client's connection
+  (`server.c:220`) — no reply, no polling.
+- `MsgDeliverEvent` with an `sigevent_t` is the alternative: the client passes its
+  event address *inside* the submit message. That is a header change, and the
+  milestone-1 header is frozen, which is why the client passes its registered name
+  instead. Say exactly that if the question comes.
+
+One limit worth knowing: the client's `MsgReceive` has no timeout, so a server that
+died mid-job would leave it waiting. It cannot happen the way it did during
+development — the server now resolves the client's connection for **every** job, so
+the second and later runs are never pulsing a dead connection — but a crashed
+server would still need the console.
 
 ---
 
@@ -748,9 +821,11 @@ is a wrong answer that appears and disappears between runs.
 
 **Synthetic Battery Telemetry (PyBaMM)** — Say: "We need data with a known
 answer, so the telemetry is simulated: one LG M50 cell discharged at 0.5C, 1C and
-2C, four channels, 60 000 samples each at 100 Hz — ten minutes per run — with
-Gaussian noise plus 1.5 % impulsive corruption, and the corruption mask kept
-offline as the answer key." If asked about `44 blocks` on the slide: it is
+2C, four channels, 60 000 samples each — the solver's own output points, 74.8 ms
+apart, 4489.8 s of discharge for the 1C run — with Gaussian noise plus 1.5 %
+impulsive corruption, and the corruption mask kept offline as the answer key. The
+client's rate argument is a nominal flag for the timestamps it prints." If asked
+about `44 blocks` on the slide: it is
 720 000 values ÷ 16 384 rounded up; per channel it is 12 series × 4 blocks = 48
 transport blocks, because a block never mixes channels.
 
@@ -850,8 +925,11 @@ screenshot:
 | Core scaling sweep | "1 → 2 → 4 workers: 2.278 → 1.253 → 0.757 ms per block, with the medians unchanged." |
 
 **Benchmark Analysis and Throughput** — The table (1 / 1.82× / 3.01×) and the
-headline: a 64 KiB block is **163.84 seconds** of 100 Hz telemetry and it sorts in
-**0.757 ms**, about **216 000× real time**. Then volunteer the caveats before
+headline: a 64 KiB block is **163.84 seconds** of telemetry at the 100 Hz design
+rate and it sorts in **0.757 ms**, about **216 000× real time**. Say which rate you
+mean if asked: the generated recording's own time column advances ~74.8 ms per
+sample (13.36 Hz, 4489.8 s in all), so one block covers 1226 s of it — the headline
+uses the design rate, the file is the file. Then volunteer the caveats before
 anyone asks: "These are one run per point, so treat ±10–20 % as noise; the
 deterministic evidence is the plan line, and the *medians* being identical across
 thread counts is what shows the parallelism changed the speed, not the answer."
@@ -864,12 +942,14 @@ gateways (keeping acquisition responsive while 64 KB blocks are processed),
 automotive telemetry (deterministic, reproducible sorting across bus channels),
 flight data recorders (verifiable, checksummed statistical descriptors).
 
-**Summary and Project Status** — Say where we are: M1 and M2 complete and verified
-on hardware; 1473 host checks plus the on-board suites; 0.757 ms per block and
-3.01× on four cores. Then the next steps, honestly: M3 is the client/server IPC and
-the rolling median filter, M4 the pulse wiring and the end-to-end timing — the
-protocol half of both already exists, and the shared region the results will use is
-already defined and tested.
+**Summary and Project Status** — Say where we are: all four milestones complete and
+verified on hardware; 1473 host checks plus the on-board suites; 0.757 ms per block
+for the sort and 3.01× on four cores; and the full service ran end to end on all
+four channels, with every channel's medians and arrays matching the host exactly.
+Have the filter numbers ready too (M3's table: 6.17× / 10.79× / 2.00× on RMSE, and
+zero replacements on the clean timestamp column). If asked what is left: two console
+screenshots were taken from earlier images and should be re-captured, and the report
+itself.
 
 *Two lines in the deck are worth correcting before the presentation:*
 `proto_checksum_block(...)` on the block-loader code slide is not a function we
@@ -887,10 +967,13 @@ have, and the merge-sort testbench slide says the invariance test covers
 | One parcel | 16 384 numbers = exactly 64 KB |
 | One recording | 60 000 readings = 3 full parcels + 10 848 |
 | Sort plan with 4 workers | 4 partitions, 2 merge phases, 7 tasks |
-| Time per parcel on the board | 0.757 ms (one worker: 2.278 ms, so 3.01×) |
-| Speed versus the data | 163.84 s of signal sorted in 0.757 ms ≈ 200 000× real time |
+| Time per parcel on the board | 0.757 ms sort (one worker: 2.278 ms, so 3.01×); ~7.3 ms for the whole server block, filter and checksums included |
+| Speed versus the data | 163.84 s of signal at the 100 Hz design rate sorted in 0.757 ms ≈ 200 000× real time; one block is 1226 s of the generated recording's own 13.36 Hz stream |
+| Threads | 4 sort workers created once per process, 1 server dispatcher, 1 client; the rolling filter is single-threaded |
+| Filter against truth | RMSE 6.17× / 10.79× / 2.00× better on voltage / current / temperature; a clean channel left byte-identical |
+| Four-channel run | every channel's medians, sorted arrays and filtered arrays matched the host exactly, 2026-10-17 |
 | Tests | 48 tests, 1473 checks on the host; the sort's 578 also pass on the board |
-| Boot image | 37 742 192 B — seven programs and the data inside one file |
+| Boot image | 37 742 192 B, SHA-256 `57637557…4588c49` — seven programs and the data inside one file |
 
 ---
 
