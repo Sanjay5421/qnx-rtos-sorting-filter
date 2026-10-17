@@ -21,7 +21,10 @@ file names. Section 3 runs the four into four directories **on the mounted card*
 so the outputs are on the SD card as they are produced; it also keeps the older
 route of running in `/tmp` and copying out, for a single channel at a time. `/tmp`
 on this image is `/dev/shmem` — **RAM** — so anything left there is gone at
-power-off. Section 6 lists what to look at if a run misbehaves.
+power-off. All four were run this way on 2026-10-17 and each channel reproduced the
+host's numbers exactly; the run data and the figures are committed under
+`tools/<channel>/` and `run-figures/<channel>/`. Section 6 lists what to look at if
+a run misbehaves.
 
 The loop needs the image whose hash is section 1. On the earlier one (`32c303e8…`)
 the server resolved the client's connection once, so from the second channel on the
@@ -216,10 +219,15 @@ On the PC, once per channel directory (the card's drive letter, or a copy of it)
 
 ```sh
 cd data
-uv run python ../tools/plot_run.py D:\voltage --out ../run-figures
-uv run python ../tools/plot_run.py D:\current --out ../run-figures
-uv run python ../tools/plot_vs_truth.py D:\voltage --out ../run-figures
+for ch in voltage current temperature time; do
+    uv run python ../tools/plot_run.py "D:/$ch" --channel $ch --out "../run-figures/$ch"
+    uv run python ../tools/plot_vs_truth.py "D:/$ch" --out "../run-figures/$ch"
+done
 ```
+
+Each channel gets its own directory, eight PNGs in each — `plot_run.py` needs
+`--channel` because the run files carry no channel name, while `plot_vs_truth.py`
+works it out by matching `raw.bin` against the dataset.
 
 `plot_run.py` reads what the board produced and writes four PNGs:
 `run_cleaned_vs_noisy.png` — the received series as a min-max envelope with the
