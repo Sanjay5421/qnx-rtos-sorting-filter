@@ -7,6 +7,12 @@
  * Start sortmed-server first. The client uses the loader already covered by
  * the host tests, submits each full 64 KiB block with MsgSendv, waits for the
  * completion pulse, then fetches the small result and reads the arrays in shm.
+ *
+ * Output files (written to the current directory when the run completes):
+ *   raw.bin       float32, same layout as the input file, one channel
+ *   sorted.bin    float32, the whole recording sorted ascending
+ *   filtered.bin  float32, the raw signal with outliers replaced (Hampel filter)
+ *   medians.csv   text, one row per block: index, samples, median, outliers
  */
 #include "protocol.h"
 #include "block_loader.h"
@@ -25,6 +31,61 @@
 #define SERVER_NAME "sortmed"
 #define CLIENT_NAME "sortmed-client"
 #define MAX_RECORDING_SAMPLES 60000u
+/* 60000 / 16384 = 4 blocks max for the current dataset; 64 leaves room. */
+#define MAX_BLOCKS 64u
+
+/* ------------------------------------------------------------------------- */
+/* Output helpers                                                             */
+/* ------------------------------------------------------------------------- */
+
+/* Write `n` float32 samples to `path` in native order (little-endian on both
+ * the host and the aarch64le target), matching the input file's layout. */
+static int write_floats(const char *path, const float *data, size_t n)
+{
+    FILE *f = fopen(path, "wb");
+    if (!f) {
+        perror(path);
+        return -1;
+    }
+    if (n > 0 && fwrite(data, sizeof(float), n, f) != n) {
+        fprintf(stderr, "client: %s: short write (%zu samples)\n", path, n);
+        fclose(f);
+        return -1;
+    }
+    if (fclose(f) != 0) {
+        perror(path);
+        return -1;
+    }
+    return 0;
+}
+
+/* Per-block statistics as CSV with a header row. */
+static int write_medians_csv(const char *path,
+                             const float    *medians,
+                             const uint32_t *samples,
+                             const uint32_t *outliers,
+                             unsigned        count)
+{
+    FILE *f = fopen(path, "w");
+    if (!f) {
+        perror(path);
+        return -1;
+    }
+    fprintf(f, "block_index,samples,median,outliers_removed\n");
+    for (unsigned i = 0; i < count; i++) {
+        fprintf(f, "%u,%u,%.9g,%u\n",
+                i, samples[i], (double)medians[i], outliers[i]);
+    }
+    if (fclose(f) != 0) {
+        perror(path);
+        return -1;
+    }
+    return 0;
+}
+
+/* ------------------------------------------------------------------------- */
+/* Protocol helpers                                                           */
+/* ------------------------------------------------------------------------- */
 
 static int parse_channel(const char *s, proto_channel_t *out)
 {
@@ -68,6 +129,10 @@ static int wait_for_done(name_attach_t *attach, uint32_t expected_job)
     }
 }
 
+/* ------------------------------------------------------------------------- */
+/* Main                                                                       */
+/* ------------------------------------------------------------------------- */
+
 int main(int argc, char **argv)
 {
     int layout;
@@ -84,6 +149,12 @@ int main(int argc, char **argv)
     size_t total = 0;
     uint32_t job_id = 1;
     int status = EXIT_FAILURE;
+
+    /* Per-block statistics collected during the loop, written at the end. */
+    float    block_medians[MAX_BLOCKS];
+    uint32_t block_samples[MAX_BLOCKS];
+    uint32_t block_outliers[MAX_BLOCKS];
+    unsigned block_count = 0;
 
     region.fd = -1;
     region.base = (void *)-1;
@@ -209,6 +280,15 @@ int main(int argc, char **argv)
         }
         memcpy(sorted_all + total, shared_sorted, bytes);
         memcpy(filtered_all + total, shared_filtered, bytes);
+
+        /* Save this block's statistics for medians.csv. */
+        if (block_count < MAX_BLOCKS) {
+            block_medians[block_count]  = result.median;
+            block_samples[block_count]  = (uint32_t)n;
+            block_outliers[block_count] = result.outliers_removed;
+            block_count++;
+        }
+
         total += (size_t)n;
         printf("job=%u samples=%d block_median=%.7g outliers=%u elapsed=%llu ns\n",
                job_id, n, (double)result.median, result.outliers_removed,
@@ -221,15 +301,20 @@ int main(int argc, char **argv)
         goto cleanup;
     }
 
-    /* Merge-combiner fallback: sort all received sorted chunks for the global median. */
+    /* Global sort of the whole recording (needed for global_median and
+     * sorted.bin). The per-block sorted chunks are irrelevant here — this
+     * re-sorts the concatenation of them, which is equivalent to sorting raw
+     * from scratch. */
     if (ms_sort_serial(sorted_all, total) != 0) {
         fprintf(stderr, "client: global sort failed\n"); goto cleanup;
     }
+
+    /* Global rolling filter over the raw signal, so block seams have context.
+     * This overwrites filtered_all with the seamless version. */
     {
         median_config_t cfg;
         uint32_t outliers = 0;
         float global_median = median_of_sorted(sorted_all, total);
-        /* Refilter the original sequence as one signal so block seams have context. */
         median_config_default(&cfg);
         if (median_filter_signal(&cfg, raw, total, filtered_all, &outliers) != 0) {
             fprintf(stderr, "client: final rolling filter failed\n"); goto cleanup;
@@ -238,6 +323,23 @@ int main(int argc, char **argv)
                "rolling_filter_width=%u global_outliers=%u\n",
                (unsigned long)total, (double)global_median, cfg.width, outliers);
     }
+
+    /* Persist the outputs. Each of the three .bin files has the same shape as
+     * the input file — float32, one value per sample, in sample order. */
+    if (write_floats("raw.bin",      raw,          total) != 0) goto cleanup;
+    if (write_floats("sorted.bin",   sorted_all,   total) != 0) goto cleanup;
+    if (write_floats("filtered.bin", filtered_all, total) != 0) goto cleanup;
+    if (write_medians_csv("medians.csv",
+                          block_medians, block_samples, block_outliers,
+                          block_count) != 0) goto cleanup;
+
+    printf("output written: raw.bin (%lu bytes), sorted.bin (%lu bytes), "
+           "filtered.bin (%lu bytes), medians.csv (%u blocks)\n",
+           (unsigned long)(total * sizeof(float)),
+           (unsigned long)(total * sizeof(float)),
+           (unsigned long)(total * sizeof(float)),
+           block_count);
+
     status = EXIT_SUCCESS;
 
 cleanup:

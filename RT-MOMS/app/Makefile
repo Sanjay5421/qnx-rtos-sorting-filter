@@ -13,7 +13,7 @@ TARGET    = aarch64le
 # build does not depend on how the shell happens to be set up. qnxsdp-env.bat
 # sets QNX_HOST.
 QCC      ?= $(if $(QNX_HOST),$(QNX_HOST)/usr/bin/qcc,qcc)
-QCFLAGS   = -Vgcc_nto$(TARGET) -std=c99 -D_QNX_SOURCE -Wall -Wextra -O2
+QCFLAGS   = -Vgcc_nto$(TARGET) -std=c99 -D_QNX_SOURCE -Wall -Wextra -O2 -lm
 
 INSTALL_BIN  = ../install/$(TARGET)/bin
 INSTALL_DATA = ../install/data
@@ -23,6 +23,7 @@ SRCDIR       = ../tests
 SOURCES  = sensor.c protocol.c block_loader.c mergesort.c median.c shared_memory.c
 HEADERS  = sensor.h protocol.h block_loader.h mergesort.h median.h shared_memory.h
 TEST_PROGRAMS = test_protocol test_sensor test_block_loader test_mergesort \
+                test_median test_shared_memory \
                 sensor_demo loader_demo pipeline_demo
 SERVICE_PROGRAMS = sortmed-server sortmed-client
 PROGRAMS = $(TEST_PROGRAMS) $(SERVICE_PROGRAMS)
