@@ -39,7 +39,7 @@
   \begin{tikzpicture}[node distance=4mm and 6mm, font=\scriptsize]
     % --- client block
     \node[block, minimum width=30mm, minimum height=15mm] (client)
-      {CLIENT\\[1mm]\tiny replays the recording,\\assembles 64 KiB blocks};
+      {CLIENT\\[1mm]\tiny replays interleaved recording,\\assembles 64 KiB blocks};
     % --- server block
     \node[block, right=34mm of client, minimum width=36mm, minimum height=15mm] (server)
       {SERVER\\[1mm]\tiny validates, sorts on a worker pool,\\filters};
@@ -149,9 +149,9 @@
   \begin{tikzpicture}[node distance=3mm and 3.5mm, font=\tiny, scale=0.90,
                       transform shape]
     \node[block, minimum width=25mm] (file)
-      {recording on disk\\\tiny float32, 60\,000 samples\\planar or interleaved};
+      {interleaved file on disk\\\tiny float32, 60\,000 records $\times$ 4\\$[t_s, V, I, T]$};
     \node[block, right=7mm of file, minimum width=27mm] (sensor)
-      {virtual sensor\\\tiny 128-sample frames\\index $\rightarrow$ timestamp};
+      {virtual sensor\\\tiny 128-sample frames\\stride 4, offset $k$};
     \node[block, right=7mm of sensor, minimum width=27mm] (loader)
       {block loader\\\tiny 16\,384 samples = 64 KiB\\min, max, FNV-1a};
     \node[block, right=7mm of loader, minimum width=29mm] (wire)

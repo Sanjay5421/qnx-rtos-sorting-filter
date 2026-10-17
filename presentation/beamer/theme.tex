@@ -157,9 +157,16 @@
 \newcommand{\rtmtablehead}[1]{{\color{rtmPrimary}\bfseries #1}}
 \renewcommand{\arraystretch}{1.15}
 
+% Wide tables: wrap in \fitwidth{...} so a table that would run past its column
+% is scaled down to fit instead of overlapping the neighbouring column. The
+% natural width is kept when it already fits, so crisp type is not shrunk for
+% nothing.
+\newcommand{\fitwidth}[1]{%
+  \resizebox{\ifdim\width>\linewidth \linewidth\else\width\fi}{!}{#1}}
+
 \lstdefinestyle{rtmc}{%
   language=C,
-  basicstyle=\ttfamily\scriptsize,
+  basicstyle=\ttfamily\tiny,
   keywordstyle=\color{rtmAccentInk}\bfseries,
   commentstyle=\color{rtmMuted}\itshape,
   stringstyle=\color{rtmAccent2},
@@ -189,9 +196,28 @@
 
 \newcommand{\concept}[2][rtmAccentInk]{{\color{#1}\bfseries #2}}
 \newcommand{\num}[1]{\textcolor{rtmAccentInk}{\bfseries #1}}
+
+% Dense slides: some frames carry four or five long bullets and would run past
+% the bottom of the frame at the default list spacing. \compactitem drops
+% beamer's intra-list skips for the list that follows, and \smalltext sets the
+% list in the next size down. Both are layout-only — no text changes.
+\newcommand{\compactitem}{%
+  \setbeamertemplate{itemize/enumerate body begin}{\vskip0pt}%
+  \setbeamertemplate{itemize/enumerate subbody begin}{\vskip0pt}%
+  \setbeamertemplate{itemize/enumerate subsubbody begin}{\vskip0pt}}
+\newcommand{\smalltext}{\small}
+
+% \tighten — a little negative space, for a frame whose list still runs a few
+% millimetres past the bottom after the two above.
+\newcommand{\tighten}{\vspace{-4mm}}
+
+% \key{…} — a short label in a filled pill, for a slide's takeaway.
+% The node is bounded by both the text width and the column width: a long
+% label wraps instead of running off the right edge of the slide.
 \newcommand{\key}[1]{%
-  \tikz[baseline=(k.base)]\node[fill=rtmAccentInk, text=white,
-    inner xsep=2.4mm, inner ysep=0.9mm, font=\ttfamily\scriptsize\bfseries] (k) {#1};}
+  \tikz[baseline=(k.base)]\node[fill=rtmAccentInk, text=white, rounded corners=1pt,
+    inner xsep=2mm, inner ysep=0.8mm, text width=\dimexpr\linewidth-4.8mm\relax,
+    align=left, font=\ttfamily\scriptsize\bfseries] (k) {#1};}
 
 % One line naming the theme, on the preview slides only. Empty in the real deck.
 \newcommand{\themeSignature}{%

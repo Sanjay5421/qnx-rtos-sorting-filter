@@ -5,7 +5,7 @@
 %   1. Introduction (Problem, median vs average, design goals)
 %   2. System Architecture & Workflows (Block diagram, client/server flowcharts)
 %   3. Implementation (Virtual Sensor, Block Loader, Protocol, Parallel Merge Sort)
-%   4. Dataset & Dual Formats (Planar vs Interleaved, PyBaMM ground truth)
+%   4. Dataset & File Format (One-time Planar vs Interleaved clarification, Interleaved in depth)
 %   5. Two-Fold Verification & Results (Host tests, Target QNX console results, Sweep)
 %   6. Use Cases & Conclusion
 % ---------------------------------------------------------------------------
@@ -66,10 +66,11 @@
 % ---------------------------------------------------------------------------
 \begin{frame}{Why a Median Filter Over an Average?}
   \begin{columns}[t, onlytextwidth]
-    \begin{column}{0.50\textwidth}
+    \begin{column}{0.54\textwidth}
       Sensor faults produce high-magnitude impulse spikes. A single faulty sample ruins an arithmetic mean completely:
       \vskip1mm
       \begin{center}
+      \fitwidth{%
       \begin{tabular}{@{}lccc@{}}
         \toprule
         \rtmtablehead{Window Readings} & \rtmtablehead{Mean} & \rtmtablehead{Median} & \rtmtablehead{Truth} \\
@@ -77,12 +78,12 @@
         5.0, 5.0, 5.0, 5.0, 5.0   & 5.0 V  & 5.0 V & 5.0 V \\
         5.0, 5.0, 5.0, 5.0, 50.0  & \num{14.0 V} & \num{5.0 V} & 5.0 V \\
         \bottomrule
-      \end{tabular}
+      \end{tabular}}
       \end{center}
       \vskip1mm
       A 50 V transient corrupts the mean by 9 V, but the median stays at 5 V.
     \end{column}
-    \begin{column}{0.47\textwidth}
+    \begin{column}{0.43\textwidth}
       \begin{itemize}
         \item \textbf{Odd kernel width}: Guarantees an unambiguous central sample.
         \item \textbf{Preserving time order}: Median filtering requires chronological order; it must run on a raw copy, not the sorted array.
@@ -99,7 +100,7 @@
 % ---------------------------------------------------------------------------
 \begin{frame}{Core Design Principles}
   \begin{columns}[t, onlytextwidth]
-    \begin{column}{0.49\textwidth}
+    \begin{column}{0.55\textwidth}
       \begin{tech}
         \textbf{Formal Contract First} \\
         A shared header (\texttt{protocol.h}) establishes message types, struct layouts, and 64 KiB block boundaries before writing application logic.
@@ -144,25 +145,27 @@
   \begin{columns}[t, onlytextwidth]
     \begin{column}{0.51\textwidth}
       \texttt{app/sensor.c} emulates a hardware telemetry device:
+      \smalltext\tighten
       \vskip1mm
+      \compactitem
       \begin{itemize}
-        \item \textbf{Sliding Window Buffer}: Keeps 4096 records in RAM (\texttt{SENSOR\_WINDOW\_SAMPLES}). Refills on demand via \texttt{fread()} as reads advance.
-        \item \textbf{Configurable Striding}: Reads planar format (\texttt{stride 1, offset 0}) or interleaved records (\texttt{stride 4, offset k}) with one code path:
+        \item \textbf{Production Interleaved Stream}: Reads directly from the interleaved telemetry record (\texttt{stride 4, offset k}) with sample formula:
         \vskip0.5mm
-        {\scriptsize\texttt{idx = (i - win\_first) * stride + offset}}
-        \item \textbf{Device-Style Frames}: \texttt{sensor\_read()} yields at most one frame (default 128 samples).
+        {\scriptsize\texttt{idx = (i - win\_first) * 4 + offset}}
+        \item \textbf{Sliding Window Buffer}: Keeps 4096 records in RAM (\texttt{SENSOR\_WINDOW\_SAMPLES}). Refills on demand via \texttt{fread()} as reads advance.
+        \item \textbf{Device-Style Frames}: \texttt{sensor\_read()} delivers at most one frame (default 128 samples).
         \item \textbf{Synthetic Clock}: Exact sample arithmetic: $t = i \times 10^9 / f_{\text{rate}}$ ns.
       \end{itemize}
     \end{column}
     \begin{column}{0.46\textwidth}
       \begin{tech}
         \textbf{Strict Input Validation} \\
-        Validates byte sizes upon opening. Explicitly rejects non-multiple float sizes, zero rates, mismatched strides, or bad offsets.
+        Validates byte sizes upon opening. Explicitly rejects non-multiple float sizes, zero rates, mismatched record strides, or invalid channel offsets.
       \end{tech}
       \vskip1.5mm
       \begin{highlight}
         \textbf{Pacing Mechanism} \\
-        \texttt{sensor\_read\_paced()} compares the virtual delivery deadline against monotonic clock (\texttt{clock\_gettime} / \texttt{nanosleep}) to hold real-world sensor rates.
+        \texttt{sensor\_read\_paced()} compares virtual delivery deadlines against monotonic clock (\texttt{clock\_gettime} / \texttt{nanosleep}) to hold real-world sensor rates.
       \end{highlight}
     \end{column}
   \end{columns}
@@ -193,10 +196,10 @@ while (n < cap) {
       \begin{itemize}
         \item \textbf{Sliding Window}: \texttt{sensor\_fill()} seeks to the required sample and reads a bounded chunk.
         \item \textbf{Zero Memory Bloat}: The full file never resides in memory at once.
-        \item \textbf{Exact Stride}: Extracts one channel at index \texttt{off} whether planar or 4-channel interleaved.
+        \item \textbf{Exact Stride}: Extracts the chosen channel with fixed stride 4 directly from the interleaved record.
       \end{itemize}
       \vskip1.5mm
-      \key{One unified inner loop handles all file formats}
+      \key{Clean strided extraction without full-file loads}
     \end{column}
   \end{columns}
 \end{frame}
@@ -209,7 +212,7 @@ while (n < cap) {
       \vskip1mm
       \begin{itemize}
         \item \textbf{Exact 64 KiB Payload}: Reads frames until \texttt{PROTO\_BLOCK\_SAMPLES} (16\,384 floats = 65\,536 B) is reached.
-        \item \textbf{Channel Mapping}: Maps protocol channel to interleaved stride offset:
+        \item \textbf{Interleaved Channel Mapping}: Isolates field ordering in a single function:
         \vskip0.5mm
         {\scriptsize\texttt{Voltage $\rightarrow$ 1, Current $\rightarrow$ 2, Temp $\rightarrow$ 3}}
         \item \textbf{Zero-Padded Final Block}: Tail samples of incomplete blocks are explicitly zeroed so uninitialized memory is never transmitted.
@@ -273,6 +276,7 @@ desc->checksum = proto_checksum_block(block->samples,
       \texttt{app/protocol.h} defines the shared binary contract:
       \vskip1mm
       \begin{center}
+      \fitwidth{%
       \begin{tabular}{@{}lll@{}}
         \toprule
         \rtmtablehead{Message} & \rtmtablehead{Size} & \rtmtablehead{Description} \\
@@ -284,7 +288,7 @@ desc->checksum = proto_checksum_block(block->samples,
         \texttt{FETCH}  & 8 B  & Client requests result for job ID \\
         \texttt{RESULT} & 48 B & Median, offsets, checksums, runtime \\
         \bottomrule
-      \end{tabular}
+      \end{tabular}}
       \end{center}
     \end{column}
     \begin{column}{0.46\textwidth}
@@ -307,7 +311,9 @@ desc->checksum = proto_checksum_block(block->samples,
   \begin{columns}[t, onlytextwidth]
     \begin{column}{0.51\textwidth}
       \texttt{app/mergesort.c} coordinates a POSIX thread pool:
+      \smalltext
       \vskip1mm
+      \compactitem
       \begin{itemize}
         \item \textbf{Thresholding}: Inputs $<$\,4096 samples run serial merge sort (pool overhead exceeds benefit).
         \item \textbf{Phase 0 (Partitions)}: 64 KiB block splits into $k$ slices ($k = \min(n/1024, \text{threads})$). Workers sort slices concurrently into scratch.
@@ -367,19 +373,19 @@ static void post_phase(mergesort_pool_t *p, unsigned ntasks) {
 \end{frame}
 
 % ===========================================================================
-\section{Dataset \& Dual Layouts}
+\section{Dataset \& File Format}
 % ===========================================================================
 
 \begin{frame}{Synthetic Battery Telemetry (PyBaMM)}
   \begin{columns}[t, onlytextwidth]
-    \begin{column}{0.50\textwidth}
+    \begin{column}{0.53\textwidth}
       Realistic multi-channel battery dataset with known ground truth:
       \vskip1mm
       \begin{itemize}
         \item \textbf{Simulation}: LG M50 cell model (\texttt{Chen2020}) with lumped thermal dynamics, discharged at 0.5C, 1C, 2C.
         \item \textbf{Channels}: Time, Voltage, Current, Temperature (60\,000 samples at 100 Hz = 600 s).
         \item \textbf{Noise Injection}: Additive white Gaussian noise (AWGN) + 1.5\% impulsive spikes ($10$--$40\sigma$), bursts, and dropouts.
-        \item \textbf{Answer Key}: Exact boolean corruption mask preserved offline to score filter accuracy.
+        \item \textbf{Answer Key}: Exact boolean corruption mask kept offline to score the filter.
       \end{itemize}
     \end{column}
     \begin{column}{0.47\textwidth}
@@ -407,36 +413,81 @@ static void post_phase(mergesort_pool_t *p, unsigned ntasks) {
 \end{frame}
 
 % ---------------------------------------------------------------------------
-\begin{frame}{Planar vs Interleaved Layouts}
+\begin{frame}{Format Clarification: Planar vs Interleaved}
   \begin{columns}[t, onlytextwidth]
     \begin{column}{0.48\textwidth}
       \begin{tech}
-        \textbf{Planar Format} \\
-        One file per channel (\texttt{r1\_voltage.bin}). 60\,000 contiguous float32 values (240\,000 B).
+        \textbf{Planar Format (Single Channel File)} \\
+        One flat file per signal (e.g. \texttt{r1\_voltage.bin}). 60\,000 contiguous floats (240\,000 B).
         \vskip0.8mm
         $\text{sample}_i = \text{file}[i]$ (\texttt{stride 1, offset 0}).
       \end{tech}
       \vskip1.5mm
       \begin{tech}
-        \textbf{Interleaved Format} \\
-        One shared file (\texttt{Chen2020\_c1...bin}). 60\,000 records of 4 floats (960\,000 B):
-        $[t_s, V, I, T]$.
+        \textbf{Interleaved Format (Production Payload)} \\
+        One unified record file (\texttt{Chen2020\_c1...bin}). 60\,000 frames $\times$ 4 float32 (960\,000 B).
         \vskip0.8mm
         $\text{sample}_i = \text{file}[4i + k]$ (\texttt{stride 4, offset k}).
       \end{tech}
     \end{column}
     \begin{column}{0.49\textwidth}
       \begin{highlight}
-        \textbf{Why the Distinction Matters} \\
-        On a planar file, numbers can be read sequentially. On an interleaved file, sorting without selecting a channel sorts seconds against volts against amperes!
+        \textbf{Why the Distinction Matters in Code} \\
+        Sorting planar data directly is meaningful. On an interleaved file, sorting without selecting channel offset $k$ sorts seconds against volts against amperes!
       \end{highlight}
       \vskip1.5mm
       \begin{itemize}
-        \item \texttt{block\_loader\_channel\_offset()} isolates this mapping (Voltage is offset 1, not 2).
-        \item Both routes produce \concept{byte-identical 64 KiB blocks} and matching checksums:
-        \vskip0.5mm
-        {\scriptsize\texttt{Block 0: 0xe90d24d2, Block 1: 0xc98cd3b2...}}
+        \item \texttt{block\_loader\_channel\_offset()} isolates this knowledge (Voltage is offset 1, not 2).
+        \item Planar was used only to cross-check offsets during initial testing.
+        \item \concept{Interleaved is our sole production format}.
       \end{itemize}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{Production Payload: Interleaved Record Layout}
+  \begin{columns}[t, onlytextwidth]
+    \begin{column}{0.50\textwidth}
+      \textbf{File}: \texttt{Chen2020\_c1\_T25\_discharge.bin} (960\,000 B)
+      \vskip1.5mm
+      Each time instant forms a 16-byte record of 4 float32 values:
+      \vskip1mm
+      \begin{center}
+      \fitwidth{%
+      \begin{tabular}{@{}ccll@{}}
+        \toprule
+        \rtmtablehead{Offset $k$} & \rtmtablehead{Bytes} & \rtmtablehead{Channel} & \rtmtablehead{Unit} \\
+        \midrule
+        0 & 0--3   & Time & Seconds ($s$) \\
+        1 & 4--7   & \concept{Voltage} & Volts ($V$) \\
+        2 & 8--11  & Current & Amperes ($A$) \\
+        3 & 12--15 & Temperature & Kelvin ($K$) \\
+        \bottomrule
+      \end{tabular}}
+      \end{center}
+      \vskip1.5mm
+      {\footnotesize 60\,000 samples $\rightarrow$ \textbf{4 transport blocks}:
+      3 full 64 KiB blocks + 1 short block (10\,848 samples).}
+    \end{column}
+    \begin{column}{0.47\textwidth}
+      \begin{highlight}
+        \textbf{Direct Struct Mapping} \\
+        Each record matches:
+        \texttt{struct \{ float t, v, i, temp; \}}
+        Seek straight to frame $n$ at byte $16n$.
+      \end{highlight}
+      \vskip2mm
+      \begin{tech}
+        \textbf{Deterministic Checksums} \\
+        Extracting the voltage channel ($k=1$) yields reproducible block checksums:
+        \begin{itemize}
+          \item Block 0: \texttt{0xe90d24d2}
+          \item Block 1: \texttt{0xc98cd3b2}
+          \item Block 2: \texttt{0x14c728bb}
+          \item Block 3: \texttt{0x362ab592}
+        \end{itemize}
+      \end{tech}
     \end{column}
   \end{columns}
 \end{frame}
@@ -458,7 +509,7 @@ static void post_phase(mergesort_pool_t *p, unsigned ntasks) {
         \item Standard GCC/POSIX testbench off the board.
         \item Tests edge boundaries (0 to 64 samples, $\pm 0.0$).
         \item Catches 1-bit checksum tampering.
-        \item Asserts Planar vs Interleaved equivalence.
+        \item Asserts strided record extraction.
         \item Verified against standard \texttt{qsort}.
       \end{itemize}
       \vskip1mm
@@ -523,12 +574,12 @@ static void post_phase(mergesort_pool_t *p, unsigned ntasks) {
 
 % ---------------------------------------------------------------------------
 \begin{frame}{Console: Block Loader Verification}
-  \columnsimage{loader}{0.5}{\texttt{test\_block\_loader /data}: 116 checks passed. Confirms planar and interleaved inputs produce byte-identical 64 KiB blocks and detects bit corruption.}
+  \columnsimage{loader}{0.5}{\texttt{test\_block\_loader /data}: 116 checks passed. Confirms strided record extraction produces deterministic 64 KiB blocks and detects bit corruption.}
 \end{frame}
 
 % ---------------------------------------------------------------------------
 \begin{frame}{Console: On-Board Payload Verification}
-  \columnsimage{cksum}{0.5}{Direct \texttt{cksum} comparison of embedded IFS files, followed by \texttt{loader\_demo}. Checksums match host-generated dataset exactly; blocks 0--3 accepted.}
+  \columnsimage{cksum}{0.5}{Direct \texttt{cksum} comparison of embedded IFS files, followed by \texttt{loader\_demo} reading the interleaved file. Checksums match host dataset; blocks 0--3 accepted.}
 \end{frame}
 
 % ---------------------------------------------------------------------------
@@ -554,10 +605,11 @@ static void post_phase(mergesort_pool_t *p, unsigned ntasks) {
 % ---------------------------------------------------------------------------
 \begin{frame}{Benchmark Analysis and Throughput}
   \begin{columns}[t, onlytextwidth]
-    \begin{column}{0.50\textwidth}
+    \begin{column}{0.56\textwidth}
       \begin{table}
         \centering
-        \begin{tabular}{@{}rrrrr@{}}
+        \fitwidth{%
+        \begin{tabular}{@{}rrrr@{}}
           \toprule
           \rtmtablehead{Workers} & \rtmtablehead{Time/Block} & \rtmtablehead{Throughput} & \rtmtablehead{Speed-up} \\
           \midrule
@@ -565,12 +617,12 @@ static void post_phase(mergesort_pool_t *p, unsigned ntasks) {
           2 & 1.253 ms & 45.66 MiB/s & 1.82$\times$ \\
           4 & \num{0.757 ms} & \num{75.55 MiB/s} & \num{3.01$\times$} \\
           \bottomrule
-        \end{tabular}
+        \end{tabular}}
       \end{table}
       \vskip1mm
       {\scriptsize Measured on physical Raspberry Pi 4 running QNX 8.0.0 SMP.}
     \end{column}
-    \begin{column}{0.46\textwidth}
+    \begin{column}{0.42\textwidth}
       \begin{highlight}
         \textbf{Massive Real-Time Headroom} \\
         One 64 KiB block represents \textbf{163.84 seconds} of 100 Hz sensor telemetry. Sorting completes in \textbf{0.757 ms} — over \num{216\,000$\times$} real-time speed.
@@ -614,7 +666,7 @@ static void post_phase(mergesort_pool_t *p, unsigned ntasks) {
   \begin{columns}[t, onlytextwidth]
     \begin{column}{0.48\textwidth}
       \begin{itemize}
-        \item \textbf{Milestone 1 (Complete)}: 64 KiB block architecture, dual planar/interleaved dataset, protocol contract, and virtual sensor.
+        \item \textbf{Milestone 1 (Complete)}: 64 KiB block architecture, production interleaved dataset, protocol contract, and virtual sensor.
         \item \textbf{Milestone 2 (Complete)}: Multi-threaded parallel merge sort with POSIX mutex and condition variable phase barriers; verified on target.
         \item \textbf{Two-Fold Verification}: 1418 host checks + bare-metal target suite with 100\% pass rate.
       \end{itemize}
