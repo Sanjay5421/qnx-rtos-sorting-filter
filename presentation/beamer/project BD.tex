@@ -1,79 +1,146 @@
-\documentclass[tikz,border=8pt]{standalone}
+\documentclass[tikz,border=6pt]{standalone}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
 \usepackage{xcolor}
-\usetikzlibrary{arrows.meta,fit,calc,shapes.geometric}
-\pgfdeclarelayer{lanes}
-\pgfdeclarelayer{engine}
-\pgfsetlayers{lanes,engine,main}
-\newcommand{\api}[1]{{\ttfamily\detokenize{#1}}}
-\definecolor{cli}{RGB}{222,235,247}
-\definecolor{srv}{RGB}{253,235,215}
-\definecolor{shm}{RGB}{226,240,217}
-\definecolor{eng}{RGB}{255,248,225}
-\definecolor{ipcbg}{RGB}{255,242,204}
-\definecolor{ipccol}{RGB}{192,0,0}
-\definecolor{datcol}{RGB}{56,118,29}
+\usetikzlibrary{arrows.meta,fit,calc,positioning}
+
+\definecolor{cliBg}{RGB}{232,242,252}
+\definecolor{cliBrd}{RGB}{45,105,175}
+\definecolor{srvBg}{RGB}{254,240,225}
+\definecolor{srvBrd}{RGB}{195,95,25}
+\definecolor{shmBg}{RGB}{230,245,225}
+\definecolor{shmBrd}{RGB}{55,130,45}
+\definecolor{ipcBg}{RGB}{255,246,215}
+\definecolor{ipcBrd}{RGB}{185,35,35}
+\definecolor{ioBg}{RGB}{242,242,245}
+\definecolor{ioBrd}{RGB}{90,90,100}
+
 \tikzset{
-  base/.style={draw=black!70, rounded corners=3pt, align=center,
-               font=\footnotesize, inner sep=4pt, minimum height=1.0cm},
-  cnode/.style={base, fill=cli},
-  snode/.style={base, fill=srv},
-  shmnode/.style={base, fill=shm},
-  ipcnode/.style={base, fill=ipcbg, draw=ipccol!70},
-  ext/.style={base, fill=black!8, draw=black!60, rounded corners=0pt},
-  wnode/.style={base, fill=eng, font=\scriptsize, text width=1.4cm,
-                minimum height=0.65cm, inner sep=2pt},
-  note/.style={font=\scriptsize, align=center},
-  flow/.style={-{Latex[length=2.5mm]}, thick, black!75},
-  ipc/.style={-{Latex[length=2.5mm]}, very thick, ipccol},
-  ipcb/.style={{Latex[length=2.5mm]}-{Latex[length=2.5mm]}, very thick, ipccol},
-  dat/.style={-{Latex[length=2.5mm]}, thick, dashed, datcol},
-  lab/.style={font=\scriptsize, inner sep=2pt},
+  box/.style={
+    draw=#1, line width=0.8pt, rounded corners=3pt,
+    align=center, font=\sffamily\footnotesize,
+    inner sep=5pt, minimum height=1.15cm
+  },
+  cblock/.style={box=cliBrd, fill=cliBg},
+  sblock/.style={box=srvBrd, fill=srvBg},
+  shmblock/.style={box=shmBrd, fill=shmBg},
+  ipcblock/.style={box=ipcBrd, fill=ipcBg},
+  ioblock/.style={box=ioBrd, fill=ioBg},
+  groupbox/.style={
+    draw=#1, line width=1.1pt, dashed, rounded corners=5pt,
+    inner sep=9pt
+  },
+  grouplabel/.style={
+    font=\sffamily\bfseries\small, inner sep=3pt
+  },
+  arr/.style={-{Latex[length=2.4mm,width=1.8mm]}, line width=0.9pt, black!75},
+  ipcarr/.style={-{Latex[length=2.5mm,width=1.9mm]}, line width=1.15pt, ipcBrd},
+  ipcboth/.style={{Latex[length=2.4mm,width=1.8mm]}-{Latex[length=2.4mm,width=1.8mm]}, line width=1.15pt, ipcBrd},
+  shmarr/.style={-{Latex[length=2.4mm,width=1.8mm]}, line width=1.0pt, dashed, shmBrd},
+  lbl/.style={font=\sffamily\scriptsize, inner sep=1.5pt}
 }
-\newcommand{\legend}[2]{\begin{scope}[shift={(#1,#2)}]
-  \draw[flow] (0,0) -- (0.8,0) node[right, lab]{Internal flow};
-  \draw[ipc]  (3.6,0) -- (4.4,0) node[right, lab]{QNX IPC (message / pulse)};
-  \draw[dat]  (8.6,0) -- (9.4,0) node[right, lab]{Shared-memory access};
-\end{scope}}
+
 \begin{document}
 \hyphenpenalty=10000\relax\exhyphenpenalty=10000\relax
 \begin{tikzpicture}
-\node[ext] (ds) at (-6.0,3.2) {Sensor dataset\\ (CSV, float time series)};
-\node[ext] (lg) at (-6.0,-3.2) {Results log\\ (median, latency)};
-\node[cnode, text width=4.2cm] (p) at (0,3.2)
-  {\textbf{Client: producer}\\ CSV reader, block builder ($\geq$64\,KiB), shm writer, request submitter};
-\node[cnode, text width=4.2cm] (q) at (0,-3.2)
-  {\textbf{Client: consumer}\\ pulse receiver (own channel), result reader, timing log};
-\node[ipcnode, text width=5.0cm] (mc) at (7.3,3.2)
-  {\textbf{Control path:} QNX message passing\\ \api{MsgSend} / \api{MsgReceive} / \api{MsgReply}\\ \api{name_attach} / \api{name_open}};
-\node[ipcnode, text width=5.0cm] (mn) at (7.3,-3.2)
-  {\textbf{Notification path:} QNX pulse\\ \api{MsgDeliverEvent} $\rightarrow$ \api{MsgReceivePulse}\\ client-owned channel};
-\node[snode, text width=4.0cm] (sh) at (14.4,3.2)
-  {\textbf{Server: main thread}\\ validate request, \api{MsgReply}, copy block, dispatch};
-\node[snode, text width=3.8cm] (sp) at (20.8,3.2)
-  {\textbf{Worker pool}\\ POSIX threads + task queue\\ mutex + condition variables\\ parallel Merge Sort};
-\node[snode, text width=3.8cm] (sm) at (20.8,-3.2)
-  {\textbf{Median engine}\\ global median (sorted data)\\ rolling median (original data)};
-\node[snode, text width=4.0cm] (sw) at (14.4,-3.2)
-  {\textbf{Server: result stage}\\ write arrays, then header; deliver completion event};
-\node[shmnode, text width=18.4cm, minimum height=1.0cm] (bar) at (7.3,0)
-  {\textbf{Shared memory} (POSIX \api{shm_open} + \api{mmap}): Input area $|$ Result area (header at fixed offset) --- accessed by offsets, never raw pointers};
 
-\draw[flow] (ds) -- node[above, lab]{float samples} (p);
-\draw[ipcb] (p.east) -- node[above, lab, pos=0.5]{request} (mc.west);
-\draw[ipcb] (mc.east) -- node[above, lab]{reply} (sh.west);
-\draw[flow] (sh) -- node[above, lab]{partitions} (sp);
-\draw[flow] (sp) -- node[right, lab]{sorted} (sm);
-\draw[flow] (sm) -- node[above, lab]{results} (sw);
-\draw[ipc] (sw.west) -- (mn.east);
-\draw[ipc] (mn.west) -- node[above, lab]{pulse} (q.east);
-\draw[flow] (q) -- (lg);
-\draw[dat] (p.south) -- node[right, lab]{write block} (p.south |- bar.north);
-\draw[dat] (bar.south -| q.north) -- node[right, lab]{read results} (q.north);
-\draw[dat] (bar.north -| sh.south) -- node[right, lab]{read block} (sh.south);
-\draw[dat] (sw.north) -- node[right, lab]{write results} (sw.north |- bar.south);
+% ==================== LEFT: CLIENT SUBSYSTEM ====================
+\node[ioblock, text width=4.0cm] (disk) at (0, 2.55) {
+  \textbf{Multi-Channel Storage}\\
+  Interleaved Sensor Telemetry\\
+  (60\,000 $\times$ 4 Channels)
+};
 
-\node[note, text width=18cm] at (7.3,-5.9)
-  {\textbf{Design rules:} one block in flight $\bullet$ the server validates every request $\bullet$ the pulse only signals completion; results are read from shared memory};
-\legend{1.3}{-7.0}
+\node[cblock, text width=4.0cm] (sensor) at (0, 0.75) {
+  \textbf{Virtual Sensor Subsystem}\\
+  Sliding-Window File Streamer\\
+  \& Channel Selector
+};
+
+\node[cblock, text width=4.0cm] (loader) at (0, -1.25) {
+  \textbf{Block Assembler}\\
+  64\,KiB Payload Packager\\
+  \& Integrity Checksum Generator
+};
+
+\node[cblock, text width=4.0cm] (cipc) at (0, -3.25) {
+  \textbf{Client Controller}\\
+  IPC Transceiver, Result Verifier\\
+  \& Full-Stream Reconstructor
+};
+
+\node[groupbox=cliBrd, fit=(disk)(sensor)(loader)(cipc),
+      label={[grouplabel, text=cliBrd]above:Client Subsystem}] (cligroup) {};
+
+% ==================== CENTER: QNX IPC & SHARED MEMORY ====================
+\node[ipcblock, text width=4.4cm] (qnxmsg) at (7.4, 2.0) {
+  \textbf{Synchronous Message Bus}\\
+  64\,KiB Block Transfer $\leftrightarrow$ ACK\\
+  Result Request $\leftrightarrow$ Summary
+};
+
+\node[ipcblock, text width=4.4cm] (qnxpulse) at (7.4, -0.35) {
+  \textbf{Asynchronous Pulse Channel}\\
+  Non-Blocking Job Completion\\
+  Notification to Client
+};
+
+\node[shmblock, text width=4.4cm] (shm) at (7.4, -2.9) {
+  \textbf{Shared Memory Region}\\
+  4 Concurrent Result Slots\\
+  Sorted Array + Filtered Array\\
+  (128\,KiB per Slot)
+};
+
+% ==================== RIGHT: SERVER SUBSYSTEM ====================
+\node[sblock, text width=4.2cm] (sipc) at (14.8, 1.85) {
+  \textbf{IPC Request Dispatcher}\\
+  Checksum Validator, Immediate ACK\\
+  \& Shared Slot Allocator
+};
+
+\node[sblock, text width=4.2cm] (sort) at (14.8, -0.55) {
+  \textbf{Parallel Merge Sort Engine}\\
+  4 Worker Threads with Barrier\\
+  4 Slices $\rightarrow$ 2 Merges $\rightarrow$ Sorted Block
+};
+
+\node[sblock, text width=4.2cm] (median) at (14.8, -2.95) {
+  \textbf{Rolling Median Filter}\\
+  9-Sample Hampel Window ($4\sigma$ MAD)\\
+  \& Block Median Extractor
+};
+
+\node[groupbox=srvBrd, fit=(sipc)(sort)(median),
+      label={[grouplabel, text=srvBrd]above:Server Subsystem}] (srvgroup) {};
+
+% ==================== CONNECTIONS ====================
+% Client internal
+\draw[arr] (disk.south) -- node[lbl, right, xshift=1.5mm]{sensor records} (sensor.north);
+\draw[arr] (sensor.south) -- node[lbl, right, xshift=1.5mm]{128-sample frames} (loader.north);
+\draw[arr] (loader.south) -- node[lbl, right, xshift=1.5mm]{64\,KiB block + seal} (cipc.north);
+
+% Server internal
+\draw[arr] (sipc.south) -- node[lbl, right, xshift=1.5mm]{copy 1 (sort)} (sort.north);
+\draw[arr] (sort.south) -- node[lbl, right, xshift=1.5mm]{copy 2 (filter)} (median.north);
+
+% Cross-process IPC & Shared Memory
+\draw[ipcboth] (cligroup.east |- qnxmsg.west) -- node[lbl, above]{Submit / Fetch} (qnxmsg.west);
+\draw[ipcboth] (qnxmsg.east) -- node[lbl, above]{Receive / Reply} (srvgroup.west |- qnxmsg.east);
+
+\draw[ipcarr] (srvgroup.west |- qnxpulse.east) -- node[lbl, above]{job complete} (qnxpulse.east);
+\draw[ipcarr] (qnxpulse.west) -- node[lbl, above]{wake signal} (cligroup.east |- qnxpulse.west);
+
+\draw[shmarr] ([yshift=0.3cm]srvgroup.west |- shm.east) -- node[lbl, above]{sorted block} ([yshift=0.3cm]shm.east);
+\draw[shmarr] ([yshift=-0.3cm]srvgroup.west |- shm.east) -- node[lbl, below]{filtered block} ([yshift=-0.3cm]shm.east);
+\draw[shmarr] (shm.west) -- node[lbl, above]{read-only mapping} (cligroup.east |- shm.west);
+
+% Legend bar at bottom
+\begin{scope}[shift={(1.8,-4.7)}]
+  \draw[arr] (0,0) -- (0.9,0) node[right, font=\sffamily\scriptsize]{Internal Data Flow};
+  \draw[ipcarr] (4.4,0) -- (5.3,0) node[right, font=\sffamily\scriptsize]{QNX Message Passing \& Pulses};
+  \draw[shmarr] (9.6,0) -- (10.5,0) node[right, font=\sffamily\scriptsize]{POSIX Shared Memory Transfer};
+\end{scope}
+
 \end{tikzpicture}
 \end{document}

@@ -142,6 +142,9 @@
 % ---------------------------------------------------------------------------
 \serverFlowchartSlide
 
+% ---------------------------------------------------------------------------
+\dataFlowSlide
+
 % ===========================================================================
 \section{Implementation}
 % ===========================================================================
@@ -963,8 +966,88 @@ slot->state = PROTO_SLOT_WRITTEN; /* 'WR2D' */
       \smalltext\compactitem
       \begin{itemize}
         \item Clean multi-core scaling ($3.01\times$ speedup on 4 physical Cortex-A72 cores).
-        \item Exact same medians ($3.7024\text{ V}$, $3.5919\text{ V}$, $3.4650\text{ V}$, $3.2683\text{ V}$) across 1, 2, and 4 workers.
+        \item Exact same medians ($3.9618\text{ V}$, $3.6416\text{ V}$, $3.3841\text{ V}$, $2.9735\text{ V}$) across 1, 2, and 4 workers.
       \end{itemize}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{End-to-End QNX Service Execution on Raspberry Pi 4}
+  \begin{columns}[t, onlytextwidth]
+    \begin{column}{0.53\textwidth}
+      {\footnotesize \texttt{sortmed-server} \& \texttt{sortmed-client} on \texttt{Chen2020\_c1\_T25\_discharge.bin}:}
+      \vskip1mm
+      \begin{center}
+      \fitwidth{%
+      \begin{tabular}{@{}rrrrr@{}}
+        \toprule
+        \rtmtablehead{Block} & \rtmtablehead{Samples} & \rtmtablehead{Median (V)} & \rtmtablehead{Spikes} & \rtmtablehead{Server Time} \\
+        \midrule
+        0 (Job 1) & 16\,384 & 3.961808 & 431 & 7.51 ms \\
+        1 (Job 2) & 16\,384 & 3.641635 & 382 & 7.32 ms \\
+        2 (Job 3) & 16\,384 & 3.384104 & 406 & 7.30 ms \\
+        3 (Job 4) & 10\,848 & 2.973536 & 283 & 5.01 ms \\
+        \midrule
+        \textbf{Global} & \textbf{60\,000} & \num{3.566194} & \num{1\,502} & \textbf{27.14 ms} \\
+        \bottomrule
+      \end{tabular}}
+      \end{center}
+      \vskip1mm
+      {\scriptsize Time breakdown per 64 KiB block: \textbf{0.757 ms} 4-worker merge sort + \textbf{$\sim$6.5 ms} width-9 Hampel filter \& FNV-1a checksums.}
+    \end{column}
+    \begin{column}{0.44\textwidth}
+      \smalltext\compactitem
+      \begin{highlight}
+        \textbf{Round-Trip Bit-Exact Proof} \\
+        \texttt{cksum raw.bin} matches the single-channel reference file (\texttt{2261229843}, 240\,000 B), proving strided extraction and IPC reassembly lost zero bits.
+      \end{highlight}
+      \vskip0.5mm
+      \begin{tech}
+        \textbf{Persisting Outputs on QNX} \\
+        Since \texttt{/tmp} is RAM (\texttt{/dev/shmem}), the SD card FAT partition (\texttt{/dev/sd0t1}) is mounted at \texttt{/var/mnt} to save \texttt{raw.bin}, \texttt{sorted.bin}, \texttt{filtered.bin}, and \texttt{medians.csv}.
+      \end{tech}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{Hardware Output: Noisy vs Hampel-Filtered Telemetry}
+  \begin{columns}[c, onlytextwidth]
+    \begin{column}{0.49\textwidth}
+      \begin{center}
+        \includegraphics[width=\linewidth, height=0.58\textheight, keepaspectratio]{assets/run_cleaned_vs_noisy}
+      \end{center}
+    \end{column}
+    \begin{column}{0.49\textwidth}
+      \begin{center}
+        \includegraphics[width=\linewidth, height=0.58\textheight, keepaspectratio]{assets/run_zoom}
+      \end{center}
+    \end{column}
+  \end{columns}
+  \vskip1mm
+  {\scriptsize \textbf{Left}: Full 60\,000-sample discharge curve (\texttt{raw.bin} vs \texttt{filtered.bin}) across the 4 block boundaries. \textbf{Right}: 2\,000-sample zoom showing how the width-9 Hampel filter strips all \textbf{1\,502 impulse spikes} while leaving the true discharge curve untouched.}
+\end{frame}
+
+% ---------------------------------------------------------------------------
+\begin{frame}{Hardware Output: Sorted Distribution \& Per-Block Summary}
+  \begin{columns}[c, onlytextwidth]
+    \begin{column}{0.62\textwidth}
+      \begin{center}
+        \includegraphics[width=\linewidth, height=0.68\textheight, keepaspectratio]{assets/run_summary}
+      \end{center}
+    \end{column}
+    \begin{column}{0.35\textwidth}
+      \smalltext\compactitem
+      \begin{highlight}
+        \textbf{Global Sorted Curve} \\
+        \texttt{sorted.bin} holds all 60\,000 samples in monotonically increasing order with global median \textbf{3.5662 V}.
+      \end{highlight}
+      \vskip1mm
+      \begin{tech}
+        \textbf{Per-Block Summary (\texttt{medians.csv})} \\
+        Tracks the voltage drop across blocks ($3.962\text{ V} \rightarrow 2.974\text{ V}$) and logs the exact outlier count removed per block ($431, 382, 406, 283$).
+      \end{tech}
     \end{column}
   \end{columns}
 \end{frame}
@@ -1010,9 +1093,9 @@ slot->state = PROTO_SLOT_WRITTEN; /* 'WR2D' */
     \begin{column}{0.48\textwidth}
       \smalltext\compactitem
       \begin{itemize}
-        \item \textbf{Two-Fold Verification}: 61 host tests (\textbf{9037 checks}, 0 failures) + on-target QNX Raspberry Pi 4 verification.
-        \item \textbf{Measured Target Speed}: \textbf{0.757 ms} sort time per 64 KiB block on 4 Cortex-A72 cores ($3.01\times$ speedup, $75.55\text{ MiB/s}$).
-        \item \textbf{Saved Outputs}: Produces verified \texttt{raw.bin}, \texttt{sorted.bin}, \texttt{filtered.bin}, and per-block \texttt{medians.csv}.
+        \item \textbf{Two-Fold Verification}: 61 host tests (\textbf{9037 checks}, 0 failures) + full end-to-end QNX Raspberry Pi 4 verification.
+        \item \textbf{Target Performance}: \textbf{0.757 ms} sort time ($3.01\times$ speedup) and \textbf{$\sim$7.3 ms} total server time per 64 KiB block across 4 Cortex-A72 cores.
+        \item \textbf{Verified Outputs}: Strips \textbf{1\,502 spikes} across 60\,000 samples and persists bit-exact \texttt{raw.bin}, \texttt{sorted.bin}, \texttt{filtered.bin}, and \texttt{medians.csv}.
       \end{itemize}
       \vskip1.5mm
       \begin{center}

@@ -1,70 +1,125 @@
-\documentclass[tikz,border=8pt]{standalone}
+\documentclass[tikz,border=6pt]{standalone}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
 \usepackage{xcolor}
-\usetikzlibrary{arrows.meta,fit,calc,shapes.geometric}
-\pgfdeclarelayer{lanes}
-\pgfdeclarelayer{engine}
-\pgfsetlayers{lanes,engine,main}
-\newcommand{\api}[1]{{\ttfamily\detokenize{#1}}}
-\definecolor{cli}{RGB}{222,235,247}
-\definecolor{srv}{RGB}{253,235,215}
-\definecolor{shm}{RGB}{226,240,217}
-\definecolor{eng}{RGB}{255,248,225}
-\definecolor{ipcbg}{RGB}{255,242,204}
-\definecolor{ipccol}{RGB}{192,0,0}
-\definecolor{datcol}{RGB}{56,118,29}
+\usetikzlibrary{arrows.meta,fit,calc,positioning}
+
+\definecolor{cliBg}{RGB}{232,242,252}
+\definecolor{cliBrd}{RGB}{45,105,175}
+\definecolor{srvBg}{RGB}{254,240,225}
+\definecolor{srvBrd}{RGB}{195,95,25}
+\definecolor{shmBg}{RGB}{230,245,225}
+\definecolor{shmBrd}{RGB}{55,130,45}
+\definecolor{ipcBrd}{RGB}{185,35,35}
+\definecolor{ioBg}{RGB}{242,242,245}
+\definecolor{ioBrd}{RGB}{90,90,100}
+
 \tikzset{
-  base/.style={draw=black!70, rounded corners=3pt, align=center,
-               font=\footnotesize, inner sep=4pt, minimum height=1.0cm},
-  cnode/.style={base, fill=cli},
-  snode/.style={base, fill=srv},
-  shmnode/.style={base, fill=shm},
-  ipcnode/.style={base, fill=ipcbg, draw=ipccol!70},
-  ext/.style={base, fill=black!8, draw=black!60, rounded corners=0pt},
-  wnode/.style={base, fill=eng, font=\scriptsize, text width=1.4cm,
-                minimum height=0.65cm, inner sep=2pt},
-  note/.style={font=\scriptsize, align=center},
-  flow/.style={-{Latex[length=2.5mm]}, thick, black!75},
-  ipc/.style={-{Latex[length=2.5mm]}, very thick, ipccol},
-  ipcb/.style={{Latex[length=2.5mm]}-{Latex[length=2.5mm]}, very thick, ipccol},
-  dat/.style={-{Latex[length=2.5mm]}, thick, dashed, datcol},
-  lab/.style={font=\scriptsize, inner sep=2pt},
+  box/.style={
+    draw=#1, line width=0.8pt, rounded corners=3pt,
+    align=center, font=\sffamily\footnotesize,
+    inner sep=5pt, minimum height=1.25cm
+  },
+  cblock/.style={box=cliBrd, fill=cliBg},
+  sblock/.style={box=srvBrd, fill=srvBg},
+  shmblock/.style={box=shmBrd, fill=shmBg},
+  ioblock/.style={box=ioBrd, fill=ioBg},
+  groupbox/.style={
+    draw=#1, line width=1.1pt, dashed, rounded corners=5pt,
+    inner sep=9pt
+  },
+  grouplabel/.style={
+    font=\sffamily\bfseries\small, inner sep=3pt
+  },
+  arr/.style={-{Latex[length=2.4mm,width=1.8mm]}, line width=0.9pt, black!75},
+  ipcarr/.style={-{Latex[length=2.5mm,width=1.9mm]}, line width=1.15pt, ipcBrd},
+  ipcboth/.style={{Latex[length=2.4mm,width=1.8mm]}-{Latex[length=2.4mm,width=1.8mm]}, line width=1.15pt, ipcBrd},
+  shmarr/.style={-{Latex[length=2.4mm,width=1.8mm]}, line width=1.0pt, dashed, shmBrd},
+  lbl/.style={font=\sffamily\scriptsize, inner sep=1.5pt}
 }
-\newcommand{\legend}[2]{\begin{scope}[shift={(#1,#2)}]
-  \draw[flow] (0,0) -- (0.8,0) node[right, lab]{Internal flow};
-  \draw[ipc]  (3.6,0) -- (4.4,0) node[right, lab]{QNX IPC (message / pulse)};
-  \draw[dat]  (8.6,0) -- (9.4,0) node[right, lab]{Shared-memory access};
-\end{scope}}
+
 \begin{document}
 \hyphenpenalty=10000\relax\exhyphenpenalty=10000\relax
 \begin{tikzpicture}
-\node[ext] (ds) at (0,0) {Sensor\\ dataset (CSV)};
-\node[cnode, text width=3.0cm] (r1) at (4.6,0) {\textbf{Dataset reader}\\ parse CSV, extract one float column};
-\node[cnode, text width=3.0cm] (r2) at (9.0,0) {\textbf{Block builder}\\ $\geq$16\,384 floats (64\,KiB), keep time order};
-\node[cnode, text width=3.0cm] (r3) at (13.4,0) {\textbf{Shm writer}\\ copy block into Input area (offset)};
-\node[cnode, text width=3.0cm] (r4) at (17.8,0) {\textbf{Request submitter}\\ send request (\api{MsgSend}), check reply};
-\node[shmnode, text width=4.2cm] (bar) at (13.4,-2.3) {\textbf{Shared memory}\\ Input area $|$ Result area};
-\node[cnode, text width=3.0cm] (b1) at (17.8,-4.6) {\textbf{Pulse receiver}\\ \api{MsgReceivePulse} on own channel};
-\node[cnode, text width=3.0cm] (b2) at (13.4,-4.6) {\textbf{Result reader}\\ read result header and arrays};
-\node[cnode, text width=3.0cm] (b3) at (9.0,-4.6) {\textbf{Logger}\\ median, filtered data, latency};
-\node[cnode, dashed, text width=5.2cm] (setup) at (2.6,-4.6)
-  {\textbf{Setup (once):} \api{name_open}, \api{shm_open} + \api{mmap}, \api{ChannelCreate} + \api{ConnectAttach}};
-\node[snode, text width=1.8cm, minimum height=6.0cm] (srv) at (22.6,-2.3) {\textbf{QNX server}\\ (main thread + worker pool)};
 
-\draw[flow] (ds) -- (r1);
-\draw[flow] (r1) -- (r2);
-\draw[flow] (r2) -- (r3);
-\draw[flow] (r3) -- (r4);
-\draw[dat] (r3.south) -- node[right, lab]{write} (bar.north);
-\draw[dat] (bar.south) -- node[right, lab]{read} (b2.north);
-\draw[ipc] (r4.east) -- node[above, lab]{\api{MsgSend}} (srv.west |- r4.east);
-\draw[ipc] (srv.west |- b1.east) -- node[above, lab]{pulse} (b1.east);
-\draw[flow] (r4.south) -- node[right, lab, align=left]{reply OK,\\ wait} (b1.north);
-\draw[flow] (b1) -- (b2);
-\draw[flow] (b2) -- (b3);
-\draw[flow] (b3.north) -- node[right, lab]{next block} (r2.south);
+% ==================== LEFT: EXTERNAL STORAGE ====================
+\node[ioblock, text width=3.5cm] (infile) at (-6.8, 1.55) {
+  \textbf{Telemetry Recording}\\
+  Interleaved 4-Channel Data\\
+  60\,000 Time Steps\\
+  (960\,KB Binary Stream)
+};
 
-\node[note, text width=15cm] at (11.0,-6.5)
-  {\textbf{Rules:} one block in flight; after a valid reply the client waits for the completion pulse, then reads the results from shared memory};
-\legend{6.8}{-7.5}
+\node[ioblock, text width=3.5cm] (outfiles) at (-6.8, -1.55) {
+  \textbf{Verified Output Storage}\\
+  Raw, Sorted \& Filtered\\
+  Signal Streams (240\,KB each)\\
+  + Block Summary Table
+};
+
+% ==================== CENTER: CLIENT SUBSYSTEM BLOCKS ====================
+\node[cblock, text width=3.8cm] (vsensor) at (-0.5, 1.55) {
+  \textbf{1. Virtual Sensor Module}\\
+  4096-Record Sliding Window\\
+  Single-Channel Extraction\\
+  128-Sample Frame Output
+};
+
+\node[cblock, text width=3.8cm] (bloader) at (5.8, 1.55) {
+  \textbf{2. Block Assembler}\\
+  16\,384-Sample Crate (64\,KiB)\\
+  Zero-Padding on Final Block\\
+  Min/Max \& Checksum Seal
+};
+
+\node[cblock, text width=3.8cm] (ipceng) at (5.8, -1.55) {
+  \textbf{3. IPC \& Pulse Transceiver}\\
+  Two-Part Scatter/Gather Send\\
+  Asynchronous Pulse Listener\\
+  Result Summary Fetcher
+};
+
+\node[cblock, text width=3.8cm] (combiner) at (-0.5, -1.55) {
+  \textbf{4. Validator \& Combiner}\\
+  Shared Slot Integrity Check\\
+  Full-Recording Global Sort\\
+  \& Seamless Boundary Filter
+};
+
+\node[groupbox=cliBrd, fit=(vsensor)(bloader)(ipceng)(combiner),
+      label={[grouplabel, text=cliBrd]above:Client Subsystem Architecture}] (clibox) {};
+
+% ==================== RIGHT: SERVER & SHARED MEMORY INTERFACES ====================
+\node[sblock, text width=3.8cm] (srvchan) at (12.4, 1.55) {
+  \textbf{QNX Server Interface}\\
+  Block Submission $\rightarrow$ ACK\\
+  Completion Pulse Notification\\
+  Result Summary Reply
+};
+
+\node[shmblock, text width=3.8cm] (shmmap) at (12.4, -1.55) {
+  \textbf{Shared Memory Interface}\\
+  Read-Only Memory Mapping\\
+  4 Result Slots (128\,KiB each)\\
+  Sorted \& Filtered Arrays
+};
+
+% ==================== CONNECTIONS ====================
+\draw[arr] (infile.east) -- node[lbl, above]{stream} (vsensor.west);
+\draw[arr] (vsensor.east) -- node[lbl, above]{frames} (bloader.west);
+\draw[arr] (bloader.south) -- node[lbl, right, xshift=1.5mm]{64\,KiB + header} (ipceng.north);
+\draw[arr] (ipceng.west) -- node[lbl, above]{offsets + seals} (combiner.east);
+\draw[arr] (combiner.west) -- node[lbl, above]{persist} (outfiles.east);
+
+\draw[ipcboth] (clibox.east |- srvchan.west) -- node[lbl, above]{IPC / Pulses} (srvchan.west);
+\draw[shmarr] (shmmap.west) -- node[lbl, above]{zero-copy read} (clibox.east |- shmmap.west);
+
+% Legend bar
+\begin{scope}[shift={(-3.5,-3.35)}]
+  \draw[arr] (0,0) -- (0.9,0) node[right, font=\sffamily\scriptsize]{Internal Module Hand-off};
+  \draw[ipcarr] (4.5,0) -- (5.4,0) node[right, font=\sffamily\scriptsize]{QNX IPC Messages \& Pulses};
+  \draw[shmarr] (9.5,0) -- (10.4,0) node[right, font=\sffamily\scriptsize]{Read-Only Shared Memory Mapping};
+\end{scope}
+
 \end{tikzpicture}
 \end{document}
