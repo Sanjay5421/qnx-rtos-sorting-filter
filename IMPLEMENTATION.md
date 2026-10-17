@@ -376,9 +376,12 @@ of the service without the IPC:
 | 2 | 2 partitions, 1 phase, 3 tasks | 1.253 ms | 0.42 ms |
 | 4 | 4 partitions, 2 phases, 7 tasks | 0.757 ms | 0.25–0.44 ms |
 
-1 → 4 workers is 3.01× on the board, and one 64 KiB block is 163.84 s of the
-100 Hz signal — the sort finishes that block in 0.757 ms, about 216 000× real
-time. The plan line changing shape with the worker count is what shows the
+1 → 4 workers is 3.01× on the board, and one 64 KiB block is 163.84 s of signal at
+the 100 Hz design rate — the sort finishes that block in 0.757 ms, about 216 000×
+real time as a rate. The generated recording is not uniformly sampled: its own
+time column advances ~74.8 ms per sample (13.36 Hz, 4489.8 s over its 60 000
+samples), so one block spans 1226 s of *that* stream and the headroom is larger
+still. The plan line changing shape with the worker count is what shows the
 parallel path doing the work, not just a faster serial one.
 
 ---

@@ -300,11 +300,13 @@ one — is doing the work:
 | 4 | `4 partitions, 2 merge phases, 7 tasks` | 0.757 ms | 75.55 MiB/s | 4 + 2 + 1 |
 
 1 → 4 workers is **3.01×** on the board (9.110 ms → 3.029 ms for the whole
-60 000-sample recording), and one 64 KiB block is 163.84 s of the 100 Hz signal,
-so the sort finishes 163.84 s of samples in 0.757 ms — about 216 000 times real
-time. The host's own numbers move between runs (0.74–1.06 ms per block at one
-worker, 0.25–0.44 ms at four); the board's were taken in one session, one run
-each.
+60 000-sample recording), and one 64 KiB block is 163.84 s of signal at the 100 Hz
+design rate, so the sort finishes that block in 0.757 ms — about 216 000 times
+real time as a rate. Nuance worth keeping: the recording measured on is sampled
+unevenly, ~74.8 ms per sample (13.36 Hz, 4489.8 s over its 60 000 samples), so the
+same block covers 1226 s of that recording. The host's own numbers move between
+runs (0.74–1.06 ms per block at one worker, 0.25–0.44 ms at four); the board's
+were taken in one session, one run each.
 
 A second board session put the interleaved record through the same command and
 got 0.744 ms per block (76.91 MiB/s) with the same medians and ranges — the planar
