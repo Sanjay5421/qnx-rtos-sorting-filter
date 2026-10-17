@@ -51,6 +51,12 @@
 \setbeamerfont{footline}{family=\ttfamily, size=\tiny}
 \setbeamerfont{caption}{size=\scriptsize}
 
+% Leading. Several frames carry 4-5 long bullets and ran a few millimetres past
+% the bottom of the frame; the text is right, the line spacing was simply too
+% generous for the amount of it. Tightened once here rather than frame by frame,
+% so a later edit to a slide does not reintroduce the overflow.
+\linespread{0.91}\selectfont
+
 % Lists carry most of the deck, so their spacing is tightened once, here,
 % rather than per slide. Beamer's defaults are generous for projection.
 \setbeamertemplate{itemize/enumerate body begin}{\vskip0.4mm}
