@@ -163,7 +163,9 @@ def main(argv: list[str]) -> int:
     r_raw, r_flt = rmse(err_raw), rmse(err_flt)
     mae_raw, mae_flt = float(err_raw.mean()), float(err_flt.mean())
     p99_raw, p99_flt = float(np.percentile(err_raw, 99)), float(np.percentile(err_flt, 99))
-    gain = r_raw / r_flt
+    perfect = r_raw == 0.0 and r_flt == 0.0
+    gain = r_raw / r_flt if r_flt > 0 else float("nan")
+    gain_txt = "already exact" if perfect else f"RMSE {gain:.2f}x better"
     noise = float(np.median(err_raw))
 
     times = npz["clean"][run, :, 0].astype(np.float64)
@@ -173,13 +175,18 @@ def main(argv: list[str]) -> int:
     print(f"samples   : {n} over {span:.1f} s of recording (mean {n / span:.2f} Hz; "
           f"{RATE_HZ:.0f} Hz is only the client's nominal flag)")
     print(f"step      : {span / (n - 1) * 1e3:.2f} ms per sample (simulator output points)")
-    print(f"noise     : median |received - clean| = {noise:.6f} V, "
-          f"largest excursion {err_raw.max():.3f} V")
+    u = UNITS[channel]
+    print(f"noise     : median |received - clean| = {noise:.6f} {u}, "
+          f"largest excursion {err_raw.max():.3f} {u}")
     print(f"received  : RMSE {r_raw:.6f}  MAE {mae_raw:.6f}  p99 {p99_raw:.6f}")
     print(f"filtered  : RMSE {r_flt:.6f}  MAE {mae_flt:.6f}  p99 {p99_flt:.6f}")
-    print(f"gain      : RMSE {gain:.2f}x better, {int((err_flt < err_raw).sum())} of {n} samples closer")
+    print(f"gain      : {gain_txt}, {int((err_flt < err_raw).sum())} of {n} samples closer")
 
     zoom_starts = busiest(replaced, int(2.0 * RATE_HZ), 3)
+    if not zoom_starts:
+        # No injected corruption in this column (a timestamp ramp, say): the
+        # busiest-window search finds nothing, so spread three windows instead.
+        zoom_starts = [int(n * f) for f in (0.2, 0.5, 0.8)]
 
     # --- 1. the whole recording ------------------------------------------------
     centres, lo, hi = envelope(raw)
@@ -192,13 +199,14 @@ def main(argv: list[str]) -> int:
         ax.axvspan(start / RATE_HZ, (start + int(2.0 * RATE_HZ)) / RATE_HZ,
                    color=FLAG, alpha=0.10, linewidth=0)
     ax.set_xlim(0, t[-1])
-    style(ax, "voltage (V)", "time (s)")
+    style(ax, f"{NPZ_CHANNELS[channel]} ({u})", "time (s)")
     ax.set_title("Against ground truth — the whole recording\n"
-                 f"{run_id}, {n} samples, {n / RATE_HZ:.0f} s at {RATE_HZ:.0f} Hz", fontsize=13)
-    box = (f"RMSE   received {r_raw * 1000:6.2f} mV   ->   filtered {r_flt * 1000:6.2f} mV"
-           f"   ({gain:.1f}x better)\n"
-           f"MAE    received {mae_raw * 1000:6.2f} mV   ->   filtered {mae_flt * 1000:6.2f} mV\n"
-           f"p99    received {p99_raw * 1000:6.2f} mV   ->   filtered {p99_flt * 1000:6.2f} mV")
+                 f"{run_id}, {n} samples (the {RATE_HZ:.0f} Hz flag is nominal)",
+                 fontsize=13)
+    box = (f"RMSE   received {r_raw * 1000:6.2f} m{u}   ->   filtered {r_flt * 1000:6.2f} m{u}"
+           f"   ({gain_txt})\n"
+           f"MAE    received {mae_raw * 1000:6.2f} m{u}   ->   filtered {mae_flt * 1000:6.2f} m{u}\n"
+           f"p99    received {p99_raw * 1000:6.2f} m{u}   ->   filtered {p99_flt * 1000:6.2f} m{u}")
     ax.text(0.012, 0.035, box, transform=ax.transAxes, fontsize=10.5, va="bottom",
             family="monospace",
             bbox=dict(boxstyle="round,pad=0.45", facecolor="white",
@@ -223,7 +231,7 @@ def main(argv: list[str]) -> int:
                 markerfacecolor="none", markeredgewidth=1.6, linestyle="none",
                 label="replaced")
         ax.set_xlim(t[start], t[stop - 1])
-        style(ax, "voltage (V)")
+        style(ax, f"{NPZ_CHANNELS[channel]} ({u})")
         ax.set_title(f"{t[start]:.1f}–{t[stop - 1]:.1f} s — {int(sel.sum())} samples replaced",
                      fontsize=12.5, loc="left")
         if start == zoom_starts[0]:
@@ -238,34 +246,55 @@ def main(argv: list[str]) -> int:
     # --- 3. error before and after -------------------------------------------
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 5.2), dpi=DPI,
                                    gridspec_kw={"width_ratios": [1.15, 1]})
-    positive = err_raw[err_raw > 0]
-    lo_e = max(float(positive.min()) if positive.size else 1e-5, 1e-5)
-    bins = np.logspace(np.log10(lo_e), np.log10(float(err_raw.max())), 70)
-    ax1.hist(np.clip(err_raw, 1e-5, None), bins=bins, color=NOISY, alpha=0.8,
-             label=f"received — RMSE {r_raw * 1000:.2f} mV")
-    ax1.hist(np.clip(err_flt, 1e-5, None), bins=bins, color=FILTER, alpha=0.8,
-             label=f"filtered — RMSE {r_flt * 1000:.2f} mV")
-    ax1.set_xscale("log")
-    ax1.set_yscale("log")
-    style(ax1, "samples (log)", "|error| against the clean signal (V, log)")
-    ax1.set_title("How far each sample sits from the truth", fontsize=13)
-    ax1.legend(framealpha=0.95)
+    if perfect:
+        # Nothing to plot: every sample arrives exactly as the dataset records it,
+        # so both errors are 0 and a log axis has no positive value to scale on.
+        for ax in (ax1, ax2):
+            ax.set_xticks([])
+            ax.set_yticks([])
+            for side in ("top", "right", "left", "bottom"):
+                ax.spines[side].set_visible(False)
+        ax1.text(0.5, 0.60, "no error at all", transform=ax1.transAxes,
+                 ha="center", fontsize=14)
+        ax1.text(0.5, 0.44, f"all {n} samples of this channel arrive exactly as the\n"
+                            "dataset records them — no injected corruption here,\n"
+                            "so the filter had nothing to remove",
+                 transform=ax1.transAxes, ha="center", fontsize=10.5)
+        ax2.text(0.5, 0.60, "nothing to improve", transform=ax2.transAxes,
+                 ha="center", fontsize=14)
+        ax2.text(0.5, 0.48, "error 0 before and after", transform=ax2.transAxes,
+                 ha="center", fontsize=10.5)
+    else:
+        positive = err_raw[err_raw > 0]
+        lo_e = max(float(positive.min()) if positive.size else 1e-5, 1e-5)
+        bins = np.logspace(np.log10(lo_e), np.log10(float(err_raw.max())), 70)
+        ax1.hist(np.clip(err_raw, 1e-5, None), bins=bins, color=NOISY, alpha=0.8,
+                 label=f"received — RMSE {r_raw * 1000:.2f} m{u}")
+        ax1.hist(np.clip(err_flt, 1e-5, None), bins=bins, color=FILTER, alpha=0.8,
+                 label=f"filtered — RMSE {r_flt * 1000:.2f} m{u}")
+        ax1.set_xscale("log")
+        ax1.set_yscale("log")
+        style(ax1, "samples (log)", f"|error| against the clean signal ({u}, log)")
+        ax1.set_title("How far each sample sits from the truth", fontsize=13)
+        ax1.legend(framealpha=0.95)
 
-    labels = ["median", "p90", "p99", "p99.9", "largest"]
-    qs = [50, 90, 99, 99.9]
-    raw_bars = [float(np.percentile(err_raw, q)) for q in qs] + [float(err_raw.max())]
-    flt_bars = [float(np.percentile(err_flt, q)) for q in qs] + [float(err_flt.max())]
-    x = np.arange(len(labels))
-    ax2.bar(x - 0.19, raw_bars, 0.36, color=NOISY, label="received")
-    ax2.bar(x + 0.19, flt_bars, 0.36, color=FILTER, label="filtered")
-    ax2.set_yscale("log")
-    ax2.set_xticks(x, labels)
-    for xi, r, f in zip(x, raw_bars, flt_bars):
-        ax2.text(xi - 0.19, r, f"{r * 1000:.1f}", ha="center", va="bottom", fontsize=9)
-        ax2.text(xi + 0.19, f, f"{f * 1000:.1f}", ha="center", va="bottom", fontsize=9)
-    ax2.set_ylim(min(flt_bars) * 0.35, max(raw_bars) * 3.2)
-    style(ax2, "error (V, log)", "error percentile — labels in mV")
-    ax2.set_title(f"Error profile, {gain:.1f}x better on RMSE", fontsize=13)
+        labels = ["median", "p90", "p99", "p99.9", "largest"]
+        qs = [50, 90, 99, 99.9]
+        raw_bars = [float(np.percentile(err_raw, q)) for q in qs] + [float(err_raw.max())]
+        flt_bars = [float(np.percentile(err_flt, q)) for q in qs] + [float(err_flt.max())]
+        x = np.arange(len(labels))
+        ax2.bar(x - 0.19, raw_bars, 0.36, color=NOISY, label="received")
+        ax2.bar(x + 0.19, flt_bars, 0.36, color=FILTER, label="filtered")
+        ax2.set_yscale("log")
+        ax2.set_xticks(x, labels)
+        for xi, r, f in zip(x, raw_bars, flt_bars):
+            ax2.text(xi - 0.19, r, f"{r * 1000:.1f}", ha="center", va="bottom",
+                     fontsize=9)
+            ax2.text(xi + 0.19, f, f"{f * 1000:.1f}", ha="center", va="bottom",
+                     fontsize=9)
+        ax2.set_ylim(min(flt_bars) * 0.35, max(raw_bars) * 3.2)
+        style(ax2, f"error ({u}, log)", "error percentile — labels scaled by 1000")
+    ax2.set_title(f"Error profile — {gain_txt}", fontsize=13)
     ax2.legend(framealpha=0.95)
     fig.suptitle("What the filter bought", fontsize=14)
     fig.tight_layout(rect=(0, 0, 1, 0.94))
@@ -298,7 +327,7 @@ def main(argv: list[str]) -> int:
         print(f"{pre}{NPZ_CHANNELS[column]:12s} {UNITS[column]:5s} "
               + " ".join(f"{v:14.7g}" for v in meds) + f" {glob:14.7g}")
     fig.suptitle(f"All four columns of {run_id}\n"
-                 "computed from the same recording — the board run processed voltage "
+                 f"computed from the same recording — the board run processed {NPZ_CHANNELS[channel]} "
                  "(one channel per run)", fontsize=13)
     fig.tight_layout(rect=(0, 0, 1, 0.93))
     fig.savefig(out_dir / "truth_columns.png", dpi=DPI)

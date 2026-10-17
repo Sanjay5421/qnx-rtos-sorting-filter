@@ -2,7 +2,11 @@
 """Plot the outputs of one sortmed run.
 
 Usage:
-    uv run python tools/plot_run.py RUN_DIR [--out DIR]
+    uv run python tools/plot_run.py RUN_DIR [--channel NAME] [--out DIR]
+
+The run files carry no channel name — the client writes raw.bin, sorted.bin,
+filtered.bin and medians.csv and nothing else — so NAME (time, current, voltage or
+temperature, default voltage) supplies the units for the axes.
 
 RUN_DIR holds the files the client wrote on the board:
 
@@ -35,6 +39,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 
 RATE_HZ = 100.0
+UNITS = {"time": "s", "current": "A", "voltage": "V", "temperature": "K"}
 DPI = 200
 NOISY = "#8d949c"
 FILTER = "#1558d6"
@@ -97,10 +102,13 @@ def read_csv(path: Path) -> list[dict]:
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("run_dir", nargs="?", default=".")
+    ap.add_argument("--channel", choices=sorted(UNITS), default="voltage",
+                    help="which channel the files hold; sets the axis units")
     ap.add_argument("--out")
     args = ap.parse_args(argv[1:])
 
     run_dir = Path(args.run_dir).expanduser()
+    unit = UNITS[args.channel]
     out_dir = Path(args.out).expanduser() if args.out else run_dir
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -116,6 +124,10 @@ def main(argv: list[str]) -> int:
     t = np.arange(n) / RATE_HZ
     changed = raw.view("u4") != filtered.view("u4")
     zoom_starts = busiest(changed, int(2.0 * RATE_HZ), 3)
+    if not zoom_starts:
+        # A channel the filter never touched — a timestamp ramp, say, which has no
+        # outliers to find. Spread three windows over the recording instead.
+        zoom_starts = [int(n * f) for f in (0.2, 0.5, 0.8)]
 
     sorted_values = None
     sorted_ok = None
@@ -149,7 +161,7 @@ def main(argv: list[str]) -> int:
         ax.axvspan(start / RATE_HZ, (start + int(2.0 * RATE_HZ)) / RATE_HZ,
                    color=FLAG, alpha=0.10, linewidth=0)
     ax.set_xlim(0, t[-1])
-    style(ax, "voltage (V)", "time (s)")
+    style(ax, f"{args.channel} ({unit})", "time (s)")
     ax.set_title(f"The whole recording — noisy telemetry and the filtered signal\n"
                  f"{n} samples over {n / RATE_HZ:.0f} s at {RATE_HZ:.0f} Hz, "
                  f"{int(changed.sum())} samples replaced", fontsize=13)
@@ -172,7 +184,7 @@ def main(argv: list[str]) -> int:
                 markerfacecolor="none", markeredgewidth=1.6, linestyle="none",
                 label="replaced")
         ax.set_xlim(t[start], t[stop - 1])
-        style(ax, "voltage (V)")
+        style(ax, f"{args.channel} ({unit})")
         ax.set_title(f"{t[start]:.1f}–{t[stop - 1]:.1f} s — {int(sel.sum())} samples replaced",
                      fontsize=12.5, loc="left")
         if start == zoom_starts[0]:
@@ -216,10 +228,10 @@ def main(argv: list[str]) -> int:
         bars = ax1.bar([f"block {i}\n({r['samples']} samples)" for i, r in zip(index, medians)],
                        med, color=FILTER, width=0.6, alpha=0.85)
         for bar, value, count in zip(bars, med, rep):
-            ax1.text(bar.get_x() + bar.get_width() / 2, value, f"{value:.5g} V\n{count} replaced",
+            ax1.text(bar.get_x() + bar.get_width() / 2, value, f"{value:.5g} {unit}\n{count} replaced",
                      ha="center", va="bottom", fontsize=10)
         ax1.set_ylim(min(med) - 0.35, max(med) + 0.55)
-        style(ax1, "block median (V)")
+        style(ax1, f"block median ({unit})")
         ax1.set_title("Median of each 64 KiB block", fontsize=13)
     else:
         ax1.text(0.5, 0.5, "medians.csv not present", ha="center", va="center",
@@ -231,7 +243,7 @@ def main(argv: list[str]) -> int:
     ax2.plot(t[changed], raw[changed], "|", color=FLAG, markersize=6, mew=1.0,
              linestyle="none", label="replaced")
     ax2.set_xlim(0, t[-1])
-    style(ax2, "voltage (V)", "time (s)")
+    style(ax2, f"{args.channel} ({unit})", "time (s)")
     ax2.set_title(f"When the filter acted — {int(changed.sum())} samples", fontsize=13)
     ax2.legend(loc="upper right", ncol=3, framealpha=0.95)
     fig.tight_layout()
