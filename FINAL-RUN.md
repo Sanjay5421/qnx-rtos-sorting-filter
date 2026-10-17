@@ -114,8 +114,8 @@ copy them:
 
 ```sh
 mkdir -p /var/mnt                  # /var is a real filesystem; /tmp cannot hold directories
-ls /dev/sd*                        # the card: /dev/sd0, first partition /dev/sd0t1
-mount -t dos /dev/sd0t1 /var/mnt   # use the partition the listing actually showed
+ls /dev/sd*                        # the card: /dev/sd0, FAT partition /dev/sd0t12
+mount -t dos /dev/sd0t12 /var/mnt  # use the t... the listing actually showed
 cp raw.bin filtered.bin sorted.bin medians.csv /var/mnt/
 sync
 umount /var/mnt
@@ -133,7 +133,7 @@ cd /tmp
 sortmed-server &
 waitfor /dev/shmem/sortmed-results
 mkdir -p /var/mnt
-mount -t dos /dev/sd0t1 /var/mnt
+mount -t dos /dev/sd0t12 /var/mnt
 cd /var/mnt
 sortmed-client /data/bin/Chen2020_c1_T25_discharge.bin interleaved voltage 100
 sync ; cd / ; umount /var/mnt
@@ -141,9 +141,13 @@ sync ; cd / ; umount /var/mnt
 
 Notes that matter:
 
-- **The device name**: `ls /dev/sd*` first. The Pi's FAT boot partition is usually
-  `/dev/sd0t1`; if the card has no partition table the whole disk is `/dev/sd0`.
-  Mount whichever exists.
+- **The device name**: `ls /dev/sd*` first. On the current card it answers
+  `/dev/sd0 /dev/sd0t12`, and the FAT boot partition is `/dev/sd0t12`; mounting
+  `t1`, which does not exist, gives `Can't mount … Invalid argument`. Use the
+  partition suffix the listing shows. A card with no partition table mounts as
+  `/dev/sd0`.
+- **If `mount -t dos` still refuses**: start the FAT module directly —
+  `/lib/dll/fs-dos.so /dev/sd0t12 /var/mnt` — and unmount with `umount /var/mnt`.
 - **`sync` then `umount`** before pulling the card — that flushes the FAT. Unplugging
   while it is mounted loses the writes, or worse, damages the filesystem.
 - **Mounting is safe while the system runs**: the image is loaded into RAM at boot,
@@ -224,6 +228,7 @@ test_protocol             # the message definition
 | Symptom | Cause, and what to do |
 | --- | --- |
 | The output files are missing after a power cycle | They were written into `/tmp`, which is memory on this image. Section 3 mounts the SD card and copies them (or runs the client there) |
+| `mount: Can't mount /var/mnt (type dos)` | The device name is wrong. Use the `t…` partition that `ls /dev/sd*` shows (`/dev/sd0t12` on the current card); if it still refuses, start the module directly: `/lib/dll/fs-dos.so /dev/sd0t12 /var/mnt` |
 | `mkdir: '/tmp/mnt': Function not implemented` | `/tmp` is `/dev/shmem`, and shmem has no directories. Create the mount point under `/var` instead — section 3 uses `/var/mnt` |
 | `client: name_open server (start server first)` | The server was not up yet. Start it (section 2) and re-run the client — it makes a single connection attempt, it does not retry |
 | `client: submit … rejected: …` | The server refused the block: `checksum` = it arrived damaged, `version` = the two sides disagree, `busy` = all four result slots are taken, `argument` = malformed header |
