@@ -26,6 +26,8 @@ data/artifacts/dataset/
 /RT-MOMS/tests/test_protocol
 /RT-MOMS/tests/test_block_loader
 /RT-MOMS/tests/test_mergesort
+/RT-MOMS/tests/test_median
+/RT-MOMS/tests/test_shared_memory
 /RT-MOMS/tests/sensor_demo
 /RT-MOMS/tests/loader_demo
 /RT-MOMS/tests/pipeline_demo
@@ -49,4 +51,6 @@ data/artifacts/dataset/
 /RT-MOMS/app/sensor_demo
 /RT-MOMS/app/loader_demo
 /RT-MOMS/app/pipeline_demo
+/RT-MOMS/app/sortmed-server
+/RT-MOMS/app/sortmed-client
 /RT-MOMS/app/*.o
