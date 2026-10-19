@@ -81,4 +81,4 @@ cross-check: server pulse/descriptor median 2244.87988 == client 2244.87988
 output written: raw.bin (240000 bytes), sorted.bin (240000 bytes), filtered.bin (240000 bytes), medians.csv (4 blocks)
 timing: run_ns=31136907 blocks=4 submit_avg_ns=199101 service_avg_ns=6223264 fetch_avg_ns=78412 block_avg_ns=6500777 server_avg_ns=5769417
 timing: post_sort_ns=5541352 post_filter_ns=19980852 write_ns=12886852
-# 
+# sync ; umount /var/mnt
