@@ -634,31 +634,31 @@ def main(argv: list[str]) -> int:
         fig.savefig(out_dir / "width_tradeoff.png", dpi=DPI)
         plt.close(fig)
 
-    # 4. width: recall against the injected burst length
+    # 4. two parameters vary here, so a heat map: one cell per (width, burst
+    #    length) pair, colour = recall. Nine overlapping lines hid this.
     if len(widths) > 1:
-        lengths = list(range(1, 8))
-        fig, ax = plt.subplots(figsize=(12, 7.5), dpi=DPI)
-        cmap = plt.get_cmap("viridis")
-        norm = plt.Normalize(min(widths), max(widths))
-        for width in widths:
-            values = []
-            for length in lengths:
-                per_channel = [r["recall_by_burst"][length] for r in scored
-                               if r["width"] == width
-                               and r["channel"] in SENSOR_CHANNELS
-                               and r["recall_by_burst"].get(length) is not None]
-                values.append(100.0 * float(np.mean(per_channel))
-                              if per_channel else float("nan"))
-            ax.plot(lengths, values, "o-", color=cmap(norm(width)),
-                    linewidth=2.2, markersize=8)
-        ax.set_ylim(0, 102)
-        ax.set_xticks(lengths, [str(l) if l < 7 else "7+" for l in lengths])
-        style(ax, "Injected samples replaced (%)",
-              "Injected burst length (samples)")
-        ax.set_title("Recall against injected burst length")
-        bar = fig.colorbar(plt.cm.ScalarMappable(cmap=cmap, norm=norm), ax=ax,
-                           pad=0.02)
-        bar.set_label("Filter width (samples)")
+        lengths = sorted({l for r in scored for l in r["recall_by_burst"]
+                          if r["recall_by_burst"][l] is not None})
+        grid = np.full((len(lengths), len(widths)), np.nan)
+        for i, length in enumerate(lengths):
+            for j, width in enumerate(widths):
+                values = [r["recall_by_burst"][length] for r in scored
+                          if r["width"] == width
+                          and r["channel"] in SENSOR_CHANNELS
+                          and r["recall_by_burst"].get(length) is not None]
+                if values:
+                    grid[i, j] = 100.0 * float(np.mean(values))
+        fig, ax = plt.subplots(figsize=(13, 8), dpi=DPI)
+        mesh = ax.pcolormesh(grid, cmap="viridis", vmin=0.0, vmax=100.0,
+                             edgecolors="white", linewidth=2.0)
+        ax.set_xticks(np.arange(len(widths)) + 0.5, [str(w) for w in widths])
+        ax.set_yticks(np.arange(len(lengths)) + 0.5,
+                      [str(l) if l < 7 else "7+" for l in lengths])
+        ax.grid(False)
+        style(ax, "Injected burst length (samples)", "Filter width (samples)")
+        ax.set_title("Recall against filter width and burst length")
+        bar = fig.colorbar(mesh, ax=ax, pad=0.02)
+        bar.set_label("Injected samples replaced (%)")
         fig.tight_layout()
         fig.savefig(out_dir / "width_bursts.png", dpi=DPI)
         plt.close(fig)

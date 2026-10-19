@@ -215,7 +215,7 @@ is the dataset's `clean` series and `outlier_mask`.
 | `width_quality.png` | recall, false replacements and RMSE gain against width |
 | `width_cost.png` | sort, filter and whole-block time against width, log-log |
 | `width_tradeoff.png` | filter cost against the RMSE gain it buys, one labelled point per width |
-| `width_bursts.png` | recall against the injected burst length, one line per width |
+| `width_bursts.png` | recall as a heat map over filter width and injected burst length |
 | `threads_scaling.png` | only from the thread sweep: cost per stage, and speedup against worker count |
 
 It also checks the invariants a sweep must not break, and exits non-zero if any
@@ -228,8 +228,11 @@ How to choose a width from the result: the smallest width whose recall stops
 improving and whose replacements on clean samples stay negligible — with the
 cost as the tie-breaker. What makes that concrete for this dataset is the
 injected burst length: a window can only swallow a burst shorter than half its
-width, so the recall curve is expected to rise until half-window covers the
-longest burst (6 samples → width 13) and to flatten after that.
+width. Most injected bursts are 1 to 6 samples, but the realised mask also
+carries a few longer runs — 8 runs of 7 samples, 2 of 8, and one each of 9 and
+10, out of 4196 runs — so recall keeps improving until the half-window reaches
+10, which is width 21, and that is exactly where the curve flattens. The width
+heat map shows the same thing cell by cell.
 
 ---
 
