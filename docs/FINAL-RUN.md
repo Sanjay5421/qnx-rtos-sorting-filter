@@ -293,19 +293,26 @@ of that block's raw samples. The second is the one that matters: `sorted.bin` is
 *client's* own global sort, the by-product of its cross-check, while the server's
 per-block sort is evidenced by the medians the completion pulse carried.
 
-What those figures showed for this run:
+What the published figures show, from the width-15 run:
 
-| Channel | RMSE gain (before → after) | Samples closer to the truth | Samples changed |
-| --- | --- | --- | --- |
-| voltage | 6.17× (23.99 → 3.89 mV; p99 43.96 → 5.28 mV) | 1464 of 60 000 | 1502 |
-| current | 10.79× | 1514 of 60 000 | 1548 |
-| temperature | 2.00× | 1458 of 60 000 | 1488 |
-| time | already exact — 0 error before and after | 0 | 0 |
+| Channel | RMSE, before → after (gain) | MAE, before → after | p99, before → after | Replaced |
+| --- | --- | --- | --- | --- |
+| voltage | 23.99 → 1.98 mV (12.1×) | 3.21 → 1.56 mV | 43.96 → 4.97 mV | 1 188 |
+| current | 158.8 → 8.53 mA (18.6×) | 13.55 → 6.25 mA | 137.8 → 20.1 mA | 1 138 |
+| temperature | 233.9 → 63.8 mK (3.67×) | 70.9 → 47.6 mK | 1.134 → 0.153 K | 1 177 |
+| time | already exact — no error before or after | — | — | 0 |
 
 `raw.bin` for every channel is the dataset's column bit for bit, and `sorted.bin`
-is an exact permutation of it, so the only samples that move are the replaced ones.
-`time` is the control: nothing was injected there and the filter left it
-byte-identical.
+is a bit-exact ascending permutation of it — this is the client's own global sort,
+written as the by-product of its cross-check, while the server's per-block sort is
+evidenced by the medians: every block median in `medians.csv` is the median of
+that block's raw samples. `time` is the control: nothing was injected there and
+the filter left it byte-identical.
+
+The replaced counts are the server's own, from `medians.csv`. Counting the bytes
+that actually differ gives one more for current (1 139) and agrees everywhere
+else, so a single sample was counted as replaced while coming back byte-identical.
+That is a one-sample discrepancy to explain, not a fault in the figures.
 
 ## 5. Board: the module suites (optional)
 

@@ -63,9 +63,13 @@ data/artifacts/dataset/
 /RT-MOMS/app/sortmed-client
 /RT-MOMS/app/*.o
 
-# Figures produced from a board run by tools/plot_run.py — regenerable from the
-# run's output files, so they are not part of the deliverable.
-/run-figures/
+# Figures produced from a board run by tools/result_plots.py. The published set
+# for the final board run is part of the deliverable; the sweep figures and any
+# trial sets beside them are regenerable from the run's own files, so they stay
+# out. The negation has to name the files, not the directory: git cannot
+# re-include anything under an excluded directory.
+/run-figures/*
+!/run-figures/*.png
 
 # A board run's own output files, copied into tools/ for plotting
 /tools/*.bin
