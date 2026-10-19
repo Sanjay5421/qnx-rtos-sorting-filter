@@ -40,6 +40,7 @@ Outputs, into --out (default: SWEEP_DIR):
     width_tradeoff.png         what a width costs against what it buys (voltage)
     width_bursts.png           recall against the injected burst length
     threads_scaling.png        cost and speedup against the worker count
+    threads_stages.png         where the block time goes, per worker count
 
 The width figures are written only when the sweep covered more than one width,
 and the scaling figure only when it covered more than one worker count: a
@@ -649,7 +650,7 @@ def main(argv: list[str]) -> int:
                 if values:
                     grid[i, j] = 100.0 * float(np.mean(values))
         fig, ax = plt.subplots(figsize=(13, 8), dpi=DPI)
-        mesh = ax.pcolormesh(grid, cmap="viridis", vmin=0.0, vmax=100.0,
+        mesh = ax.pcolormesh(grid, cmap="cividis", vmin=0.0, vmax=100.0,
                              edgecolors="white", linewidth=2.0)
         ax.set_xticks(np.arange(len(widths)) + 0.5, [str(w) for w in widths])
         ax.set_yticks(np.arange(len(lengths)) + 0.5,
@@ -698,6 +699,31 @@ def main(argv: list[str]) -> int:
         fig.savefig(out_dir / "threads_scaling.png", dpi=DPI)
         plt.close(fig)
 
+        # Where the block time actually goes, per worker count: the segments the
+        # threads shrink, and the one they cannot touch.
+        stages = (("copy_ns", "copy", "#999999"),
+                  ("sort_ns", "sort", STAGE_COLOURS["sort"]),
+                  ("filter_ns", "filter", STAGE_COLOURS["filter"]),
+                  ("sum_ns", "sums", "#009E73"),
+                  ("merge_ns", "merge", "#CC79A7"))
+        fig, ax = plt.subplots(figsize=(13, 8), dpi=DPI)
+        bottoms = np.zeros(len(threads))
+        for field, label, colour in stages:
+            xs_s, means = stage_by_workers(field)
+            if xs_s != list(threads):
+                continue
+            values = np.array(means)
+            ax.bar(xs_s, values, bottom=bottoms, width=0.62, color=colour,
+                   edgecolor="white", linewidth=1.5, label=label)
+            bottoms += values
+        ax.set_xticks(threads, [str(t) for t in threads])
+        style(ax, "Time per 64 KiB block (ms)", "Worker threads")
+        ax.set_title("Block time composition")
+        legend_below(ax, columns=5, y=-0.12)
+        fig.tight_layout()
+        fig.savefig(out_dir / "threads_stages.png", dpi=DPI)
+        plt.close(fig)
+
     # 6. the client's view, when the logs are there
     client_rows = []
     for r in scored:
@@ -721,7 +747,8 @@ def main(argv: list[str]) -> int:
                      "width_tradeoff.png", "width_bursts.png"):
             print(f"wrote      : {out_dir / name}")
     if len(threads) > 1:
-        print(f"wrote      : {out_dir / 'threads_scaling.png'}")
+        for name in ("threads_scaling.png", "threads_stages.png"):
+            print(f"wrote      : {out_dir / name}")
 
     return 1 if problems else 0
 

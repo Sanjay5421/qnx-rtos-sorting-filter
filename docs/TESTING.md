@@ -217,6 +217,7 @@ is the dataset's `clean` series and `outlier_mask`.
 | `width_tradeoff.png` | filter cost against the RMSE gain it buys, one labelled point per width |
 | `width_bursts.png` | recall as a heat map over filter width and injected burst length |
 | `threads_scaling.png` | only from the thread sweep: cost per stage, and speedup against worker count |
+| `threads_stages.png` | only from the thread sweep: where the block time goes, stage by stage |
 
 It also checks the invariants a sweep must not break, and exits non-zero if any
 fails: every case of the same recording and channel must have an identical
