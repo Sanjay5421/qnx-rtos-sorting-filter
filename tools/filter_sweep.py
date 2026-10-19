@@ -35,11 +35,15 @@ Outputs, into --out (default: SWEEP_DIR):
 
     quality.csv                per case: masked recall, clean replacements, RMSE
     cost.csv                   per full block: the server's stage times, in ms
-    sweep_recall_vs_width.png  recall, false replacements and RMSE gain vs width
-    sweep_cost_vs_width.png    filter and total ms per block vs width, log-log
-    sweep_pareto.png           what each width costs against what it buys
-    sweep_burst_recall.png     recall against the injected burst length
-    sweep_threads.png          only when the sweep covered worker counts
+    width_quality.png          recall, false replacements and RMSE gain vs width
+    width_cost.png             sort, filter and whole-block ms vs width, log-log
+    width_tradeoff.png         what a width costs against what it buys (voltage)
+    width_bursts.png           recall against the injected burst length
+    threads_scaling.png        cost and speedup against the worker count
+
+The width figures are written only when the sweep covered more than one width,
+and the scaling figure only when it covered more than one worker count: a
+single-point curve is worse than no figure.
 
 It also checks the invariants a sweep must not break: every case of the same
 recording and channel has an identical raw.bin (the same input), identical
@@ -64,25 +68,43 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 
 DPI = 200
+
+# Okabe-Ito, the standard colour-blind-safe set: one colour per channel, used
+# identically in every figure. The three stages get their own colours too.
 CHANNEL_COLOURS = {
-    "voltage": "#1558d6",
-    "current": "#188038",
-    "temperature": "#d93025",
-    "time": "#8d949c",
+    "voltage": "#0072B2",
+    "current": "#009E73",
+    "temperature": "#D55E00",
+    "time": "#999999",
+}
+STAGE_COLOURS = {
+    "sort": "#0072B2",
+    "filter": "#D55E00",
+    "total": "#000000",
 }
 SENSOR_CHANNELS = ("voltage", "current", "temperature")
 
 plt.rcParams.update({
-    "font.size": 12,
-    "axes.titlesize": 14,
-    "axes.labelsize": 12.5,
-    "legend.fontsize": 10.5,
-    "xtick.labelsize": 10.5,
-    "ytick.labelsize": 10.5,
-    "axes.linewidth": 0.9,
-    "axes.edgecolor": "#444444",
+    "font.family": "serif",
+    "font.size": 14,
+    "axes.titlesize": 17,
+    "axes.labelsize": 15,
+    "legend.fontsize": 13,
+    "xtick.labelsize": 13,
+    "ytick.labelsize": 13,
+    "axes.linewidth": 1.0,
+    "axes.edgecolor": "#333333",
+    "axes.grid": True,
+    "axes.axisbelow": True,
+    "grid.color": "#DDDDDD",
+    "grid.linewidth": 0.8,
+    "xtick.direction": "in",
+    "ytick.direction": "in",
+    "xtick.top": True,
+    "ytick.right": True,
     "figure.facecolor": "white",
     "savefig.facecolor": "white",
+    "savefig.bbox": "tight",
 })
 
 NPZ_CANDIDATES = (
@@ -152,12 +174,7 @@ def match_run(npz, raw: np.ndarray) -> tuple[int, int]:
 
 
 def style(ax, ylabel: str | None = None, xlabel: str | None = None) -> None:
-    ax.grid(True, color="#d8d8d8", linewidth=0.7)
-    ax.set_axisbelow(True)
-    for side in ("top", "right"):
-        ax.spines[side].set_visible(False)
-    if ylabel:
-        ax.set_ylabel(ylabel)
+    ax.set_ylabel(ylabel or "")
     if xlabel:
         ax.set_xlabel(xlabel)
 
@@ -486,189 +503,199 @@ def main(argv: list[str]) -> int:
               "case of a recording/channel)")
 
     # --- figures --------------------------------------------------------------
-    def series(width: int, channel: str, field: str, reps: bool = False):
-        """Mean of `field` over the repeats of (width, channel)."""
+    # Only the figures a sweep can support are written: the width figures need
+    # more than one width, the scaling figure more than one worker count. A
+    # single-point "curve" is worse than no figure at all.
+    def series(width: int, channel: str, field: str):
+        """Mean of `field` over the repeats of (width, channel), or None."""
         values = [r[field] for r in scored
                   if r["width"] == width and r["channel"] == channel
                   and r[field] is not None]
-        if not values:
-            return None
-        return float(np.mean(values))
+        return float(np.mean(values)) if values else None
 
-    def cost_series(field: str, threads_value: int | None = None):
-        """Mean/min/max of a stage over every block at each width."""
-        xs, means, los, his = [], [], [], []
+    def plotted(values):
+        """Percentages, with the missing values kept out of the line."""
+        return [100.0 * v if v is not None else float("nan") for v in values]
+
+    def stage_by_width(field: str):
+        """(widths, mean ms) of a stage over the sensor channels, per width."""
+        xs, means = [], []
         for width in widths:
             values = [r[field] for r in scored
-                      if r["width"] == width and r[field] is not None
-                      and (threads_value is None or r["threads"] == threads_value)]
+                      if r["width"] == width and r["channel"] in SENSOR_CHANNELS
+                      and r[field] is not None]
             if not values:
                 continue
             xs.append(width)
             means.append(float(np.mean(values)) / 1e6)
-            los.append(float(np.min(values)) / 1e6)
-            his.append(float(np.max(values)) / 1e6)
-        return xs, means, los, his
+        return xs, means
 
-    # 1. quality against width
-    fig, axes = plt.subplots(3, 1, figsize=(11, 12.5), dpi=DPI, sharex=True)
-    plotted = False
-    for channel in channels:
-        recall = [series(w, channel, "recall") for w in widths]
-        if any(v is not None for v in recall):
-            axes[0].plot(widths, [100.0 * (v or 0.0) for v in recall], "o-",
-                         color=CHANNEL_COLOURS.get(channel, "#333333"),
-                         label=channel)
-            plotted = True
-    axes[0].set_ylim(0, 102)
-    style(axes[0], "injected outliers replaced (%)", None)
-    axes[0].set_title("What the filter finds: recall of the injected outliers", fontsize=13)
-    if plotted:
-        axes[0].legend(loc="lower right", ncol=3, framealpha=0.95)
-    else:
-        axes[0].text(0.5, 0.5, "no injected outliers in these channels",
-                     transform=axes[0].transAxes, ha="center")
+    def stage_by_workers(field: str):
+        """(worker counts, mean ms) of a stage over the sensor channels."""
+        xs, means = [], []
+        for workers in threads:
+            values = [r[field] for r in scored
+                      if r["threads"] == workers
+                      and r["channel"] in SENSOR_CHANNELS
+                      and r[field] is not None]
+            if not values:
+                continue
+            xs.append(workers)
+            means.append(float(np.mean(values)) / 1e6)
+        return xs, means
 
-    for channel in channels:
-        clean = [series(w, channel, "clean_replaced_rate") for w in widths]
-        if any(v is not None for v in clean):
-            axes[1].plot(widths, [100.0 * (v or 0.0) for v in clean], "o-",
-                         color=CHANNEL_COLOURS.get(channel, "#333333"),
-                         label=channel)
-    style(axes[1], "clean samples replaced (%)", None)
-    axes[1].set_title("What it costs in false alarms: replacements the mask does "
-                      "not explain", fontsize=13)
-    axes[1].legend(loc="upper right", ncol=3, framealpha=0.95)
+    def legend_below(ax, columns: int = 3, y: float = -0.20) -> None:
+        """A legend under the axes, so it can never sit on the data."""
+        ax.legend(loc="upper center", bbox_to_anchor=(0.5, y), ncol=columns,
+                  frameon=False)
 
-    for channel in channels:
-        gain = [series(w, channel, "gain") for w in widths]
-        if any(v is not None for v in gain):
-            axes[2].plot(widths, gain, "o-",
-                         color=CHANNEL_COLOURS.get(channel, "#333333"),
-                         label=channel)
-    axes[2].axhline(1.0, color="#bbbbbb", linewidth=1.0, linestyle="--")
-    style(axes[2], "RMSE gain (received / filtered)", "rolling-filter width (samples)")
-    axes[2].set_title("What it buys: error against ground truth", fontsize=13)
-    axes[2].legend(loc="upper left", ncol=3, framealpha=0.95)
-    axes[2].set_xticks(widths, [str(w) for w in widths])
-    fig.suptitle("Filter width against quality — the board's own filtered.bin, "
-                 "scored against the dataset truth", fontsize=14)
-    fig.tight_layout(rect=(0, 0, 1, 0.97))
-    fig.savefig(out_dir / "sweep_recall_vs_width.png", dpi=DPI)
-    plt.close(fig)
+    def width_axis(ax) -> None:
+        ax.set_xscale("log")
+        ax.set_xticks(widths, [str(w) for w in widths])
+        ax.minorticks_off()
 
-    # 2. cost against width (log-log, with the fitted exponent)
-    xs, means, los, his = cost_series("filter_ns")
-    fig, ax = plt.subplots(figsize=(10.5, 6.0), dpi=DPI)
-    if xs:
-        ax.fill_between(xs, los, his, color="#1558d6", alpha=0.15, linewidth=0)
-        ax.plot(xs, means, "o-", color="#1558d6", linewidth=1.8,
-                label="filter (Hampel)")
-        if len(xs) >= 2:
-            slope = float(np.polyfit(np.log(xs), np.log(means), 1)[0])
-            ax.text(0.03, 0.94, f"filter cost ~ width^{slope:.2f}\n"
-                                f"(fitted over {xs[0]}..{xs[-1]} samples)",
-                    transform=ax.transAxes, va="top", family="monospace",
-                    fontsize=10.5,
-                    bbox=dict(boxstyle="round,pad=0.45", facecolor="white",
-                              edgecolor="#bbbbbb", alpha=0.95))
-    xs_t, means_t, los_t, his_t = cost_series("total_ns")
-    if xs_t:
-        ax.plot(xs_t, means_t, "s--", color="#8d949c", linewidth=1.5,
-                label="whole job (copy, sort, filter, sums, merge)")
-    ax.set_xscale("log")
-    ax.set_yscale("log")
-    ax.set_xticks(widths, [str(w) for w in widths])
-    style(ax, "milliseconds per 64 KiB block (log)", "rolling-filter width (samples, log)")
-    ax.set_title("What each width costs on the board — per-block service time", fontsize=13.5)
-    ax.legend(loc="lower right", framealpha=0.95)
-    fig.tight_layout()
-    fig.savefig(out_dir / "sweep_cost_vs_width.png", dpi=DPI)
-    plt.close(fig)
+    # 1. width: what it does to quality
+    if len(widths) > 1:
+        fig, axes = plt.subplots(3, 1, figsize=(13, 13), dpi=DPI, sharex=True)
+        for channel in [c for c in channels if c in SENSOR_CHANNELS]:
+            colour = CHANNEL_COLOURS[channel]
+            recall = [series(w, channel, "recall") for w in widths]
+            clean = [series(w, channel, "clean_replaced_rate") for w in widths]
+            gain = [series(w, channel, "gain") for w in widths]
+            for ax, values in ((axes[0], recall), (axes[1], clean),
+                               (axes[2], gain)):
+                if not any(v is not None for v in values):
+                    continue
+                ys = plotted(values) if ax is not axes[2] else [
+                    v if v is not None else float("nan") for v in values]
+                ax.plot(widths, ys, "o-", color=colour, linewidth=2.2,
+                        markersize=8, label=channel)
+        axes[0].set_ylim(0, 102)
+        axes[1].set_yscale("log")
+        axes[2].set_yscale("log")
+        style(axes[0], "Injected outliers replaced (%)")
+        style(axes[1], "Clean samples replaced (%, log)")
+        style(axes[2], "RMSE gain against truth (x, log)",
+              "Filter width (samples, log)")
+        for ax in axes:
+            width_axis(ax)
+        handles, labels = axes[0].get_legend_handles_labels()
+        fig.legend(handles, labels, loc="lower center", ncol=3, frameon=False,
+                   bbox_to_anchor=(0.5, -0.01))
+        fig.suptitle("Filter width and output quality", fontsize=19)
+        fig.tight_layout(rect=(0, 0.03, 1, 0.97))
+        fig.savefig(out_dir / "width_quality.png", dpi=DPI)
+        plt.close(fig)
 
-    # 3. the trade-off, one point per width
-    fig, ax = plt.subplots(figsize=(10.5, 6.4), dpi=DPI)
-    for channel in channels:
-        xs_c, ys_c, labels = [], [], []
+    # 2. width: what it costs, stage by stage
+    if len(widths) > 1:
+        fig, ax = plt.subplots(figsize=(12, 7.5), dpi=DPI)
+        for field, label, colour, marker in (
+                ("sort_ns", "sort", STAGE_COLOURS["sort"], "s"),
+                ("filter_ns", "filter", STAGE_COLOURS["filter"], "^"),
+                ("total_ns", "whole block", STAGE_COLOURS["total"], "o")):
+            xs_s, means = stage_by_width(field)
+            if xs_s:
+                ax.plot(xs_s, means, marker + "-", color=colour,
+                        linewidth=2.2, markersize=9, label=label)
+        ax.set_xscale("log")
+        ax.set_yscale("log")
+        width_axis(ax)
+        style(ax, "Time per 64 KiB block (ms, log)",
+              "Filter width (samples, log)")
+        ax.set_title("Filter width and processing cost")
+        legend_below(ax)
+        fig.tight_layout()
+        fig.savefig(out_dir / "width_cost.png", dpi=DPI)
+        plt.close(fig)
+
+    # 3. width: the trade-off, one labelled point per width
+    if len(widths) > 1:
+        fig, ax = plt.subplots(figsize=(12, 7.5), dpi=DPI)
+        xs_c, ys_c, seen = [], [], []
         for width in widths:
-            cost = series(width, channel, "filter_ms")
-            quality = series(width, channel, "gain")
-            if cost is None or quality is None:
+            cost = series(width, "voltage", "filter_ms")
+            gain = series(width, "voltage", "gain")
+            if cost is None or gain is None:
                 continue
             xs_c.append(cost)
-            ys_c.append(quality)
-            labels.append(str(width))
-        if not xs_c:
-            continue
-        colour = CHANNEL_COLOURS.get(channel, "#333333")
-        ax.plot(xs_c, ys_c, "-", color=colour, alpha=0.5, linewidth=1.2)
-        ax.plot(xs_c, ys_c, "o", color=colour, markersize=6, label=channel)
-        for x, y, label in zip(xs_c, ys_c, labels):
-            ax.annotate(label, (x, y), textcoords="offset points", xytext=(6, 4),
-                        fontsize=9, color=colour)
-    style(ax, "RMSE gain against ground truth",
-          "filter cost (ms per 64 KiB block)")
-    ax.set_title("The trade-off: what each width buys for what it costs "
-                 "(labels are widths)", fontsize=13.5)
-    ax.legend(loc="lower right", framealpha=0.95)
-    fig.tight_layout()
-    fig.savefig(out_dir / "sweep_pareto.png", dpi=DPI)
-    plt.close(fig)
-
-    # 4. recall by injected burst length
-    fig, ax = plt.subplots(figsize=(10.5, 6.0), dpi=DPI)
-    lengths = list(range(1, 8))
-    for width in widths:
-        values = []
-        for length in lengths:
-            per_channel = [r["recall_by_burst"][length] for r in scored
-                           if r["width"] == width
-                           and r["channel"] in SENSOR_CHANNELS
-                           and r["recall_by_burst"].get(length) is not None]
-            values.append(100.0 * float(np.mean(per_channel))
-                          if per_channel else np.nan)
-        if not np.all(np.isnan(values)):
-            ax.plot(lengths, values, "o-", label=f"width {width}")
-    ax.axvline(4.0 / 1.0, color="#eeeeee", linewidth=0)  # keeps autoscale honest
-    style(ax, "injected samples replaced (%)", "length of the injected burst (samples)")
-    ax.set_xticks(lengths, [str(l) if l < 7 else "7+" for l in lengths])
-    ax.set_ylim(0, 102)
-    ax.set_title("Bursts are where a window shows its length: recall by burst length "
-                 "(sensor channels)", fontsize=13)
-    ax.legend(ncol=2, loc="lower right", framealpha=0.95)
-    fig.tight_layout()
-    fig.savefig(out_dir / "sweep_burst_recall.png", dpi=DPI)
-    plt.close(fig)
-
-    # 5. worker counts, if the sweep covered them
-    if len(threads) > 1:
-        fig, ax = plt.subplots(figsize=(10.5, 6.0), dpi=DPI)
-        for field, label, colour in (("sort_ns", "sort (parallel)", "#1558d6"),
-                                     ("filter_ns", "filter (serial)", "#d93025"),
-                                     ("total_ns", "whole job", "#188038")):
-            xs_t, means_t, los_t, his_t = cost_series(field,
-                                                      threads_value=None)
-            # cost_series() walks widths; for the threads figure walk threads
-            xs_t, means_t, los_t, his_t = [], [], [], []
-            for t in threads:
-                values = [r[field] for r in scored
-                          if r["threads"] == t and r[field] is not None]
-                if not values:
-                    continue
-                xs_t.append(t)
-                means_t.append(float(np.mean(values)) / 1e6)
-                los_t.append(float(np.min(values)) / 1e6)
-                his_t.append(float(np.max(values)) / 1e6)
-            ax.fill_between(xs_t, los_t, his_t, color=colour, alpha=0.12,
-                            linewidth=0)
-            ax.plot(xs_t, means_t, "o-", color=colour, label=label)
-        ax.set_xticks(threads, [str(t) for t in threads])
-        style(ax, "milliseconds per 64 KiB block", "merge-sort worker threads")
-        ax.set_title("Where the threads land: workers speed up the sort, and the "
-                     "serial filter sets the total", fontsize=13)
-        ax.legend(framealpha=0.95)
+            ys_c.append(gain)
+            seen.append(width)
+        ax.plot(xs_c, ys_c, "o-", color="#000000", linewidth=2.2, markersize=9)
+        for width, x, y in zip(seen, xs_c, ys_c):
+            ax.annotate(str(width), (x, y), textcoords="offset points",
+                        xytext=(9, -14), fontsize=13)
+        ax.set_xscale("log")
+        ax.set_yscale("log")
+        style(ax, "RMSE gain against truth (x, log)",
+              "Filter cost (ms per 64 KiB block, log)")
+        ax.set_title("Voltage: quality against filter cost")
         fig.tight_layout()
-        fig.savefig(out_dir / "sweep_threads.png", dpi=DPI)
+        fig.savefig(out_dir / "width_tradeoff.png", dpi=DPI)
+        plt.close(fig)
+
+    # 4. width: recall against the injected burst length
+    if len(widths) > 1:
+        lengths = list(range(1, 8))
+        fig, ax = plt.subplots(figsize=(12, 7.5), dpi=DPI)
+        cmap = plt.get_cmap("viridis")
+        norm = plt.Normalize(min(widths), max(widths))
+        for width in widths:
+            values = []
+            for length in lengths:
+                per_channel = [r["recall_by_burst"][length] for r in scored
+                               if r["width"] == width
+                               and r["channel"] in SENSOR_CHANNELS
+                               and r["recall_by_burst"].get(length) is not None]
+                values.append(100.0 * float(np.mean(per_channel))
+                              if per_channel else float("nan"))
+            ax.plot(lengths, values, "o-", color=cmap(norm(width)),
+                    linewidth=2.2, markersize=8)
+        ax.set_ylim(0, 102)
+        ax.set_xticks(lengths, [str(l) if l < 7 else "7+" for l in lengths])
+        style(ax, "Injected samples replaced (%)",
+              "Injected burst length (samples)")
+        ax.set_title("Recall against injected burst length")
+        bar = fig.colorbar(plt.cm.ScalarMappable(cmap=cmap, norm=norm), ax=ax,
+                           pad=0.02)
+        bar.set_label("Filter width (samples)")
+        fig.tight_layout()
+        fig.savefig(out_dir / "width_bursts.png", dpi=DPI)
+        plt.close(fig)
+
+    # 5. workers: what the extra threads buy, and what they do not
+    if len(threads) > 1:
+        fig, axes = plt.subplots(1, 2, figsize=(16, 7), dpi=DPI)
+        for field, label, colour, marker in (
+                ("sort_ns", "sort", STAGE_COLOURS["sort"], "s"),
+                ("filter_ns", "filter", STAGE_COLOURS["filter"], "^"),
+                ("total_ns", "whole block", STAGE_COLOURS["total"], "o")):
+            xs_w, means = stage_by_workers(field)
+            if xs_w:
+                axes[0].plot(xs_w, means, marker + "-", color=colour,
+                             linewidth=2.2, markersize=9, label=label)
+        axes[0].set_xticks(threads, [str(t) for t in threads])
+        style(axes[0], "Time per 64 KiB block (ms)", "Worker threads")
+        axes[0].set_title("Cost")
+        legend_below(axes[0], y=-0.18)
+
+        for field, label, colour, marker in (
+                ("sort_ns", "sort", STAGE_COLOURS["sort"], "s"),
+                ("total_ns", "whole block", STAGE_COLOURS["total"], "o")):
+            xs_w, means = stage_by_workers(field)
+            if not means or not means[0]:
+                continue
+            axes[1].plot(xs_w, [means[0] / m for m in means], marker + "-",
+                         color=colour, linewidth=2.2, markersize=9, label=label)
+        axes[1].plot(threads, threads, ":", color="#999999", linewidth=1.6,
+                     label="ideal")
+        axes[1].set_xticks(threads, [str(t) for t in threads])
+        style(axes[1], "Speedup against one worker (x)", "Worker threads")
+        axes[1].set_title("Speedup")
+        legend_below(axes[1], y=-0.18)
+        fig.suptitle("Worker count, cost and speedup", fontsize=19)
+        fig.tight_layout(rect=(0, 0.02, 1, 0.94))
+        fig.savefig(out_dir / "threads_scaling.png", dpi=DPI)
         plt.close(fig)
 
     # 6. the client's view, when the logs are there
@@ -689,11 +716,12 @@ def main(argv: list[str]) -> int:
     print()
     for name in ("quality.csv", "cost.csv"):
         print(f"wrote      : {out_dir / name}")
-    for name in ("sweep_recall_vs_width.png", "sweep_cost_vs_width.png",
-                 "sweep_pareto.png", "sweep_burst_recall.png"):
-        print(f"wrote      : {out_dir / name}")
+    if len(widths) > 1:
+        for name in ("width_quality.png", "width_cost.png",
+                     "width_tradeoff.png", "width_bursts.png"):
+            print(f"wrote      : {out_dir / name}")
     if len(threads) > 1:
-        print(f"wrote      : {out_dir / 'sweep_threads.png'}")
+        print(f"wrote      : {out_dir / 'threads_scaling.png'}")
 
     return 1 if problems else 0
 

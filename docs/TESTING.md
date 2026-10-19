@@ -212,11 +212,11 @@ is the dataset's `clean` series and `outlier_mask`.
 | `quality.csv` | per case: how many injected outliers were replaced (recall), how many *clean* samples were replaced, RMSE/MAE/p99 before and after, the worst surviving error at an injected sample |
 | `cost.csv` | per full block: the server's stage times in ms — copy, sort, filter, sums, merge, publish, total |
 | `client_timing.csv` | the client's own view: whole run, submit, service, fetch, and its post-processing |
-| `sweep_recall_vs_width.png` | recall, false replacements and RMSE gain against width |
-| `sweep_cost_vs_width.png` | cost against width, log-log, with the fitted exponent (the filter is the superlinear part) |
-| `sweep_pareto.png` | what each width buys against what it costs — the width choice, as a picture |
-| `sweep_burst_recall.png` | recall against the injected burst length: where a window shows its length |
-| `sweep_threads.png` | only from the thread sweep: sort, filter and total against worker count |
+| `width_quality.png` | recall, false replacements and RMSE gain against width |
+| `width_cost.png` | sort, filter and whole-block time against width, log-log |
+| `width_tradeoff.png` | filter cost against the RMSE gain it buys, one labelled point per width |
+| `width_bursts.png` | recall against the injected burst length, one line per width |
+| `threads_scaling.png` | only from the thread sweep: cost per stage, and speedup against worker count |
 
 It also checks the invariants a sweep must not break, and exits non-zero if any
 fails: every case of the same recording and channel must have an identical
