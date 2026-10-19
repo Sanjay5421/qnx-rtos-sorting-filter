@@ -16,8 +16,10 @@ data/artifacts/dataset/
 
 # Sweep output: a full run is ~100 MiB of case directories, and it is
 # regenerable from the board. Keep the manifests and the server logs (they are
-# the provenance), drop the raw/sorted/filtered arrays.
+# the provenance); drop everything a case directory holds.
 /tools/perf/**/*.bin
+/tools/perf/**/medians.csv
+/tools/perf/**/client.log
 
 # Build outputs of RT-MOMS/tests. The .exe rule covers host builds; the bare
 # names would be produced by a target or Linux build with the same Makefile, and
