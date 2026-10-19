@@ -10,6 +10,22 @@
 \usepackage{setspace}
 \usepackage{graphicx}
 \usepackage{pdflscape}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,fit}
+\usepackage{listings}
+\lstset{
+  language=C,
+  basicstyle=\ttfamily\small,
+  keywordstyle=\bfseries,
+  commentstyle=\itshape,
+  frame=single,
+  captionpos=t,
+  numbers=left,
+  numberstyle=\tiny,
+  breaklines=true,
+  columns=fullflexible,
+  showstringspaces=false
+}
 \usepackage{amsmath}
 \usepackage{titlesec}
 \usepackage{tocloft}
@@ -288,13 +304,219 @@ The data starts as raw binary files on disk, is loaded by the client, transferre
 % ============================================================
 % CHAPTER 3
 % ============================================================
-\chapter{Process Implementation}
+\chapter{Methodology}
 
 \section{Introduction}
 This chapter details the implementation of the core algorithms, the data structures, and the QNX-specific mechanisms used to build the service.
 
-\section{Virtual Sensor and Block Loader}
-The virtual sensor (\texttt{sensor.c}) replays the PyBaMM dataset from a binary file, simulating a live sensor. The block loader (\texttt{block\_loader.c}) aggregates these samples into exact 64 KB blocks (\texttt{PROTO\_BLOCK\_SAMPLES} of 16384 float32 values).
+\section{Virtual Sensor}
+\label{sec:sensor}
+
+There is no physical sensor on the bench, so the service is fed by a module that
+replays a recording with the behaviour of a live device. Values arrive one sample
+at a time, in frames, on a clock the module keeps itself rather than at the speed
+of the host. The purpose is not convenience: with the sensor behind this
+interface the client and the rest of the pipeline can be developed and tested
+exactly as they will run against hardware, and a real device can replace the
+module later without changing anything downstream.
+
+\subsection{Configuration}
+
+Everything the caller can choose sits in one structure, so the two file layouts
+are configuration rather than separate code paths:
+
+\begin{table}[htbp]
+\centering
+\caption{Fields of \texttt{sensor\_config\_t}. Passing a null configuration to
+\texttt{sensor\_open} selects the defaults in the last column.}
+\label{tab:sensor-config}
+\begin{tabular}{@{}llp{6.2cm}l@{}}
+\hline
+Field & Type & Meaning & Default \\
+\hline
+\texttt{layout} & \texttt{int} & \texttt{SENSOR\_LAYOUT\_PLANAR}, one sample per float, or \texttt{SENSOR\_LAYOUT\_INTERLEAVED}, \texttt{stride} floats per record & planar \\
+\texttt{offset} & \texttt{int} & interleaved only: which float of a record this sensor delivers & 0 \\
+\texttt{stride} & \texttt{int} & interleaved only: floats per record & 1 \\
+\texttt{frame\_samples} & \texttt{size\_t} & samples a single read may deliver & 128 \\
+\texttt{rate\_hz} & \texttt{uint32\_t} & virtual rate used for timestamps and pacing & 100 \\
+\texttt{loop} & \texttt{int} & restart at the end of the recording, as a live sensor would & 0 \\
+\hline
+\end{tabular}
+\end{table}
+
+\subsection{Addressing a sample in either layout}
+
+Both layouts are headerless little-endian \texttt{float32}, and both are read by
+one expression, where \texttt{next} is the sample the sensor is about to deliver:
+
+\begin{equation}
+  \texttt{value} = \texttt{window}\bigl[(\texttt{next} - \texttt{window\_first})
+  \times \texttt{stride} + \texttt{offset}\bigr]
+  \label{eq:sensor-address}
+\end{equation}
+
+A planar file is \texttt{stride} 1 and \texttt{offset} 0, so sample $i$ is float
+$i$. An interleaved file is four floats per record --- time, voltage, current,
+temperature --- so sample $i$ of the voltage channel is float $4i + 1$: record 1
+is float 5, byte 20 of the file. The three unused floats of each record are read
+from disk and discarded; a channel other than the selected one is never returned.
+Figure~\ref{fig:sensor-layout} shows both cases.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[font=\footnotesize\sffamily,
+  cell/.style={draw, minimum width=1.0cm, minimum height=0.8cm,
+               inner sep=0pt, align=center},
+  sel/.style={cell, fill=blue!18},
+  tag/.style={font=\scriptsize\sffamily}]
+  % planar
+  \node[anchor=east, font=\scriptsize\bfseries\sffamily] at (-0.1, 1.55) {planar};
+  \foreach \i in {0,...,5}
+    \node[cell] at (\i + 0.5, 1.55) {\i};
+  \node[sel] at (3.5, 1.55) {3};
+  \node[tag] at (3.5, 0.95) {sample 3 = float 3};
+  % interleaved
+  \node[anchor=east, font=\scriptsize\bfseries\sffamily] at (-0.1, -0.3) {interleaved};
+  \node[cell] at (0.5, -0.3) {0\\[-2pt]{\scriptsize t}};
+  \node[cell] at (1.5, -0.3) {1\\[-2pt]{\scriptsize v}};
+  \node[cell] at (2.5, -0.3) {2\\[-2pt]{\scriptsize i}};
+  \node[cell] at (3.5, -0.3) {3\\[-2pt]{\scriptsize T}};
+  \node[cell] at (4.5, -0.3) {4\\[-2pt]{\scriptsize t}};
+  \node[sel]  at (5.5, -0.3) {5\\[-2pt]{\scriptsize v}};
+  \node[cell] at (6.5, -0.3) {6\\[-2pt]{\scriptsize i}};
+  \node[cell] at (7.5, -0.3) {7\\[-2pt]{\scriptsize T}};
+  \draw[dashed, rounded corners=2pt] (-0.05, -0.85) rectangle (4.05, 0.25);
+  \node[tag] at (2.0, -1.1) {record 0};
+  \draw[dashed, rounded corners=2pt] (3.95, -0.85) rectangle (8.05, 0.25);
+  \node[tag] at (6.0, -1.1) {record 1};
+  \node[tag, anchor=west] at (8.2, -0.3) {sample 5 = float $4\cdot 1 + 1$ = float 5, byte 20};
+\end{tikzpicture}
+\caption{How one sample is addressed. A planar file holds one sample per float,
+so sample $i$ is float $i$. An interleaved file holds four floats per record, so
+sample $i$ of the voltage channel is float $4i + 1$; the other three floats of
+each record are skipped.}
+\label{fig:sensor-layout}
+\end{figure}
+
+\subsection{The read-ahead window}
+
+The recording is not loaded whole. Reads pass through a sliding window of
+\texttt{window\_samples} records --- 4096 by default, widened when the caller's
+frame is larger --- which is refilled as the reader advances. In the real pipeline
+the block loader asks for block-sized frames, so the window becomes 16\,384
+records: 64\,KiB of a planar file or 256\,KiB of an interleaved one, in one call
+to \texttt{fread}. A caller reading one sample at a time therefore sees exactly
+the same values as a caller reading whole blocks, a property the tests use as an
+independent check.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[font=\footnotesize\sffamily,
+  blk/.style={draw, minimum height=1.0cm, text width=3.0cm, align=center,
+              inner sep=2pt},
+  winblk/.style={draw, minimum height=1.0cm, text width=4.3cm, align=center,
+                 inner sep=2pt, fill=blue!15, very thick, draw=blue!55}]
+  \node[blk, fill=gray!12] (seen) {already delivered};
+  \node[winblk, right=0.4cm of seen] (win)
+    {read-ahead window\\[2pt] \texttt{window\_samples} records};
+  \node[blk, right=0.4cm of win] (next) {not yet read};
+  \node[font=\scriptsize\sffamily, above=0.95cm of win, align=center]
+    {one \texttt{fread} refills it here};
+  \draw[->, thick] ([yshift=0.82cm]win.north) -- (win.north);
+  \draw[->, thick] ([xshift=0.9cm]win.south) -- ++(0,-0.45)
+    node[below, font=\scriptsize\sffamily] {\texttt{next}};
+\end{tikzpicture}
+\caption{The sliding window. Everything behind it has been delivered, everything
+ahead has not been read; when \texttt{next} reaches the window's end, one
+\texttt{fread} refills the window from the new position.}
+\label{fig:sensor-window}
+\end{figure}
+
+The refill condition is the three-part test in Listing~\ref{lst:sensor-read}: the
+window is empty, the reader was rewound behind it, or it has walked past the end.
+The loop applies the test before every sample, so no case can read stale data.
+
+\noindent\begin{minipage}{\linewidth}
+\begin{lstlisting}[caption={The read loop of \texttt{sensor\_read()}, trimmed of
+its error returns. A device read delivers at most one frame; aggregating frames
+into a block is the caller's job.}, label={lst:sensor-read},
+basicstyle=\ttfamily\footnotesize]
+while (n < cap) {
+    if (s->next >= s->total) {
+        if (!s->cfg.loop)
+            break;                      /* end of the recording */
+        s->next = 0;                    /* a live sensor never stops */
+    }
+
+    if (s->window_count == 0 ||         /* nothing read yet */
+        s->next < s->window_first ||    /* rewound behind the window */
+        s->next >= s->window_first + s->window_count)
+        sensor_fill(s, s->next);        /* refill at the new position */
+
+    offset = (s->next - s->window_first) * s->cfg.stride + s->cfg.offset;
+    dst[n++] = s->window[offset];       /* the one channel that was asked for */
+    s->next++;
+    s->delivered++;
+}
+\end{lstlisting}
+\end{minipage}
+
+\subsection{Frames, blocks and the sensor's clock}
+
+A device read returns a frame, not an arbitrary amount of data:
+\texttt{sensor\_read} delivers at most \texttt{frame\_samples} samples, and
+\texttt{sensor\_read\_frame} delivers exactly one frame except at the end of a
+recording. Assembling a 64\,KiB payload is the client's concern, which is what
+\texttt{sensor\_read\_block} does: it calls \texttt{sensor\_read} until the block
+is full, so the aggregation sits on the client side of the boundary rather than
+inside the device.
+
+The clock is arithmetic rather than a system timer. The timestamp of the next
+sample is \texttt{sensor\_index} $\times 10^9 / \texttt{rate\_hz}$ nanoseconds,
+computed from a counter of samples delivered, so after 600 samples at 100\,Hz it
+is exactly 6\,s however fast the host runs; in loop mode the counter keeps
+advancing across the wrap, as a sensor that never stops would.
+\texttt{sensor\_read\_paced} adds a wait after each read so the stream holds the
+configured rate. That wait and the monotonic clock behind it are the only
+platform-specific code in the project --- \texttt{clock\_gettime} and
+\texttt{nanosleep} on QNX, with one shim for the host build --- and its resolution
+is a millisecond, so pacing is meaningful up to roughly 500\,Hz.
+
+\subsection{Rejecting bad input, and the interface}
+
+Nothing is assumed about the file. A missing path, an empty file, a length that is
+not a whole number of \texttt{float32} values or of records, an offset outside the
+record, a stride below one, an unknown layout, a frame or rate out of range ---
+each returns a null handle or an error code and prints a sentence naming the
+problem instead of reading nonsense. Reads follow the same discipline: the number
+of samples delivered, 0 at the end of a recording, $-1$ for an error.
+
+\begin{table}[htbp]
+\centering
+\caption{The sensor's interface, including the counters that report the recording
+and the sensor's own timeline.}
+\label{tab:sensor-api}
+\begin{tabular}{@{}lp{7.4cm}@{}}
+\hline
+Function & Purpose \\
+\hline
+\texttt{sensor\_total\_samples(s)} & number of samples in the recording \\
+\texttt{sensor\_remaining(s)} & samples left before the end \\
+\texttt{sensor\_index(s)} & samples delivered since open or reset \\
+\texttt{sensor\_open(path, cfg)} & open a recording; a null configuration selects the defaults \\
+\texttt{sensor\_read(s, dst, max)} & deliver at most one frame \\
+\texttt{sensor\_read\_frame(s, dst)} & deliver exactly one frame \\
+\texttt{sensor\_read\_block(s, dst, n)} & aggregate frames into a block of $n$ samples \\
+\texttt{sensor\_read\_paced(s, dst, max)} & read, then wait for the configured rate \\
+\texttt{sensor\_timestamp\_ns(s)} & the next sample's time on the sensor's clock \\
+\texttt{sensor\_reset(s)} & rewind and restart the timeline \\
+\texttt{sensor\_close(s)} & release the handle \\
+\hline
+\end{tabular}
+\end{table}
+
+\section{Block Loader}
+The block loader (\texttt{block\_loader.c}) aggregates these samples into exact 64 KB blocks (\texttt{PROTO\_BLOCK\_SAMPLES} of 16384 float32 values).
 
 \section{Parallel Merge-Sort}
 The server sorts each block using a parallel Merge-Sort algorithm. The sort is partitioned across multiple POSIX worker threads. A mutex and two condition variables (\texttt{work\_ready}, \texttt{phase\_done}) are used to synchronize the phases, ensuring that merge operations only begin after all preceding partition tasks are complete.
