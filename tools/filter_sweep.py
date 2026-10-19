@@ -39,6 +39,7 @@ Outputs, into --out (default: SWEEP_DIR):
     width_cost.png             sort, filter and whole-block ms vs width, log-log
     width_tradeoff.png         what a width costs against what it buys (voltage)
     width_bursts.png           recall against the injected burst length
+    width_bursts.csv           the numbers behind that heat map
     threads_scaling.png        cost and speedup against the worker count
     threads_stages.png         where the block time goes, per worker count
 
@@ -324,6 +325,10 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--manifest",
                     help="which manifest to read when the directory holds more "
                          "than one sweep (default: sweep.manifest)")
+    ap.add_argument("--burst-cmap", default="cividis", metavar="NAME",
+                    help="colormap for the burst heat map: any name matplotlib "
+                         "knows, e.g. magma, inferno, plasma, cividis, turbo "
+                         "(default: cividis)")
     args = ap.parse_args(argv[1:])
 
     root = Path(args.sweep_dir).expanduser()
@@ -650,7 +655,7 @@ def main(argv: list[str]) -> int:
                 if values:
                     grid[i, j] = 100.0 * float(np.mean(values))
         fig, ax = plt.subplots(figsize=(13, 8), dpi=DPI)
-        mesh = ax.pcolormesh(grid, cmap="cividis", vmin=0.0, vmax=100.0,
+        mesh = ax.pcolormesh(grid, cmap=args.burst_cmap, vmin=0.0, vmax=100.0,
                              edgecolors="white", linewidth=2.0)
         ax.set_xticks(np.arange(len(widths)) + 0.5, [str(w) for w in widths])
         ax.set_yticks(np.arange(len(lengths)) + 0.5,
@@ -663,6 +668,16 @@ def main(argv: list[str]) -> int:
         fig.tight_layout()
         fig.savefig(out_dir / "width_bursts.png", dpi=DPI)
         plt.close(fig)
+
+        # The numbers behind the heat map, so it can be redrawn in any colormap
+        # (and any colour limits) without re-deriving them.
+        with (out_dir / "width_bursts.csv").open("w", newline="") as handle:
+            writer = csv.writer(handle)
+            writer.writerow(["burst_length"] + [str(w) for w in widths])
+            for i, length in enumerate(lengths):
+                writer.writerow([length] + ["" if np.isnan(v) else f"{v:.2f}"
+                                            for v in grid[i]])
+        print(f"wrote      : {out_dir / 'width_bursts.csv'}")
 
     # 5. workers: what the extra threads buy, and what they do not
     if len(threads) > 1:
