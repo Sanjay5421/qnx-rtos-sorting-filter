@@ -325,10 +325,10 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--manifest",
                     help="which manifest to read when the directory holds more "
                          "than one sweep (default: sweep.manifest)")
-    ap.add_argument("--burst-cmap", default="cividis", metavar="NAME",
+    ap.add_argument("--burst-cmap", default="magma", metavar="NAME",
                     help="colormap for the burst heat map: any name matplotlib "
                          "knows, e.g. magma, inferno, plasma, cividis, turbo "
-                         "(default: cividis)")
+                         "(default: magma)")
     args = ap.parse_args(argv[1:])
 
     root = Path(args.sweep_dir).expanduser()

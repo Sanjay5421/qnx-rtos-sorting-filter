@@ -38,9 +38,20 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   of a recording and channel.
 - **`docs/TESTING.md`** — every test, host and board, the commands to run them,
   the sweeps, and how to read their output.
+- **`photos/`** — the board-run evidence kept beside the code: the boot console,
+  the test programs' output, the width and thread sweeps, and the two raw
+  console transcripts (`test_outputs.txt`, `sweeps.txt`).
 
 ### Changed
 
+- **The burst heat map in `tools/filter_sweep.py`.** It takes `--burst-cmap
+  NAME` and now defaults to `magma`, picked by rendering the real grid in
+  magma, inferno and plasma. The recall values run from 0-5 % to 75-100 % with
+  little between, so plasma flattens the whole passing region into one yellow,
+  while magma keeps both the failure frontier and the 87 % plateau of
+  two-sample bursts legible. The grid itself is exported as `width_bursts.csv`,
+  so the figure can be redrawn in any palette, or with banded colour limits,
+  without re-deriving the numbers from the cases.
 - `median_width_valid()` and `median_width_parse()` are now the one home of the
   width rule, shared by the filter, the message validation and the command line.
 - The build installs the board scripts beside the programs and
