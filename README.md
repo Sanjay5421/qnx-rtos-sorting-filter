@@ -1,220 +1,149 @@
 # Real-Time Multi-Core Sorting and Median Filter Service
 
-The client continuously offloads unsorted floating-point time-series metrics (≥ 64 KB) to the server. The server implements a parallel Merge-Sort algorithm across multiple worker threads, using mutexes and condition variables to control the recursive merging phases across partitioned memory. In addition, the server computes rolling median filters to eliminate sensor outliers. On completion, the server sends a QNX pulse event back to the client with the calculated median and memory-offset descriptor.
+[![RTOS: QNX 8.0](https://img.shields.io/badge/RTOS-QNX_8.0-CC0000?style=for-the-badge)](docs/IMPLEMENTATION.md)
+[![Platform: Raspberry Pi 4](https://img.shields.io/badge/Platform-Raspberry_Pi_4-A22846?style=for-the-badge&logo=raspberrypi&logoColor=white)](docs/FINAL-RUN.md)
+[![Language: C99](https://img.shields.io/badge/Language-C99-A8B9CC?style=for-the-badge&logo=c&logoColor=283593)](RT-MOMS/app)
+[![Tests: 9 150 passing](https://img.shields.io/badge/Tests-9_150_passing-2088FF?style=for-the-badge&logo=githubactions&logoColor=white)](#testing)
 
-The workload this service is built around is synthesised offline, so it can be
-replayed at realistic volumes with a known ground truth: multi-channel battery
-recordings carrying Gaussian sensor noise and impulsive outliers, together with
-the injection mask a median filter can be scored against.
+[![Speed-up: 3.00x on 4 cores](https://img.shields.io/badge/Speed--up-3.00x_on_4_cores-2F7D32?style=for-the-badge&logo=speedtest&logoColor=white)](docs/IMPLEMENTATION.md)
+[![Filter: 12.1x RMSE gain](https://img.shields.io/badge/Filter-12.1x_RMSE_gain-6A1B9A?style=for-the-badge)](run-figures/error_map.png)
+[![Docs: Markdown and LaTeX](https://img.shields.io/badge/Docs-Markdown_%2B_LaTeX-008080?style=for-the-badge&logo=markdown&logoColor=white)](#documentation)
+
+A QNX client/server service for on-line sensor telemetry. The client offloads
+64 KiB blocks of unsorted float32 readings; the server validates each block with an
+FNV-1a seal, sorts it with a four-thread parallel merge sort, removes outliers with
+a rolling Hampel median filter, and signals completion with a **QNX pulse** — the
+client then fetches the median and a memory-offset descriptor pointing into a shared
+results region.
+
+Everything runs on a Raspberry Pi 4 from a single boot image: the two programs, the
+seven test suites, the three measurement scripts and the payload.
+
+## Results
+
+Measured on the Raspberry Pi 4, `ifs-rpi4.bin`, SHA-256 `2ac01f08…31fc9d8b`.
+
+| | |
+| --- | --- |
+| One 64 KiB block sorted, 4 workers | **0.80 ms** (2.40 ms on one worker) — **3.00×** |
+| Server stage per block | 7.5 ms at filter width 9; **12.2 ms at width 15** |
+| Error against ground truth, width 15 | **12.1× / 18.6× / 3.67×** RMSE on voltage / current / temperature |
+| Clean channel | **0 replacements**, byte-identical in and out |
+| Tests | **9 150 checks**, 0 failed, 0 skipped — host *and* board |
+| Repeatability | 20-run soak, **20 identical medians**, 7.21 ms service time/block |
+| Real-time headroom | one block = 163.84 s of signal at 100 Hz, sorted in 0.80 ms |
+
+The rolling filter's width was chosen from a board sweep, not assumed: recall and
+RMSE gain both plateau at **15**, and past it the block time doubles and triples for
+a third of a point. Recall at width 15 is 98.6 % of injected samples, and the
+dataset's worst bursts (6 samples) fit inside its half-window.
+
+## How it works
+
+```mermaid
+flowchart LR
+    C["client<br/>64 KiB blocks + descriptor"] -->|"MsgSendv — 2-part IOV"| S["server<br/>validate · sort ×4 · filter"]
+    S -->|"ack, then pulse"| C
+    S -.->|writes| M[("shared region<br/>sorted + filtered")]
+    C -->|"fetch: median + offsets"| S
+    M -.-> C
+```
+
+- **One delivery, two items.** The 48-byte descriptor and the 64 KiB block travel as
+  an IOV, so the server can validate the header before pulling the payload — no
+  64 KiB receive buffer just to learn the size.
+- **The ack comes before the pulse.** An `rcvid` dies once it is replied to, so the
+  client supplies its own connection and receives the asynchronous pulse later.
+- **Two buffers, not one.** Sorting destroys time order and the filter needs it, so
+  the filter runs on a time-ordered copy; the sorted copy yields the block median as
+  a by-product.
+- **Results leave through shared memory.** 128 KiB of arrays would be copied twice
+  as messages; instead the region holds them and the reply carries byte offsets and
+  a seal per array.
+
+## Figures
+
+![Per-channel error over time, before and after the filter, in units of each channel's noise sigma](run-figures/error_map.png)
+
+![Three windows where the filter acted, magnified](run-figures/filter_zoom_voltage.png)
+
+![The whole recording against the same values in ascending order](run-figures/sort_curve_voltage.png)
 
 ## Repository layout
 
 | Path | Contents |
 | --- | --- |
-| `README.md` | this file |
-| `CHANGELOG.md` | what changed, and why |
-| `RT-MOMS/` | the QNX side: the service sources in `app/`, the host tests in `tests/`, the board scripts in `board/`, the board support package with the boot image in `images/` |
-| `docs/` | the documents: `IMPLEMENTATION.md` (how each stage works, in pipeline order, with diagrams), `TESTING.md` (every test, and how to run it), `REPRODUCE.md` (every build and run command), `FINAL-RUN.md` (the integrated board run), `STUDY-GUIDE.md` (the project in plain language), `milestones-draft.md`, and the assignment and report template |
-| `tools/` | `result_plots.py` turns a run's files into the report figures — sorting, filter quality, zooms and the error map — against the dataset's ground truth; `filter_sweep.py` scores a width or worker-count sweep from the board |
-| `data/` | PyBaMM generator for the synthetic client payload (`src/battery_dataset/`) |
-| `data/artifacts/dataset/` | generated payload — `.npz`, manifest, CSV (git-ignored, ≈ 20 MiB) |
-| `data/artifacts/figures/` | generated diagnostic figures (committed; shown below) |
-| `legacy/` | the first, standalone loader experiment — superseded by `RT-MOMS/tests/sensor_demo.c` |
-| `run-figures/` | the published figures from the final board run — `error_map.png` and the per-channel set — regenerated by `tools/result_plots.py`; the sweep figures and any trial sets beside them stay git-ignored |
-| `presentation/` | the Beamer deck for the demo |
+| `RT-MOMS/app/` | the service: sensor, block loader, protocol, client, server, parallel merge sort, median filter, shared region |
+| `RT-MOMS/tests/` | six test suites plus the KPI benchmark |
+| `RT-MOMS/board/` | three board scripts: sweep, client deadline, soak |
+| `RT-MOMS/images/` | the image build and `ifs-rpi4.bin` |
+| `data/` | PyBaMM dataset generator — payload and answer key |
+| `tools/` | `filter_sweep.py` (scores a sweep), `result_plots.py` (report figures) |
+| `run-figures/` | the published figures from the final board run |
+| `report/` | the report template, converted to LaTeX |
+| `presentation/` | the Beamer deck |
+| `docs/` | implementation, study guide, reproduction, testing, final run, changelog |
 
-## Generating the dataset — one command
+## Build and run
 
-```bash
-cd data
-uv run python -m battery_dataset
+```sh
+# Host: build and run the six suites — 9 150 checks
+cd RT-MOMS/tests && make check
+
+# Board: cross-compile everything and build the boot image
+cd RT-MOMS && make
 ```
 
-That command does everything: solves the simulations, injects the sensor noise,
-writes the `.npz` payload, the `metadata.json` manifest and every CSV, and
-renders the figures. `uv run battery-dataset` is the equivalent console script.
-`uv` installs PyBaMM, NumPy and Matplotlib on first run, so there is no manual
-setup. The build takes about 20 s.
+Flashing the image and the full six-step board run are in
+[docs/FINAL-RUN.md](docs/FINAL-RUN.md); the host-side reproduction is in
+[docs/REPRODUCE.md](docs/REPRODUCE.md).
 
-| Flag | Effect |
+## Testing
+
+Two folds, one set of sources. The host builds the suites with `gcc`; the board
+builds the *same* files with `qcc -Vgcc_ntoaarch64le`. Both return the same counts:
+
+| Suite | Checks | What it establishes |
+| --- | --- | --- |
+| `test_protocol` | 186 | the wire contract: 64 KiB, safe message numbers, seal sensitivity, region arithmetic |
+| `test_sensor` | 642 | a file behaves like a device: both layouts agree, frames capped, clock exact, junk refused |
+| `test_block_loader` | 116 | a stream becomes blocks that survive the trip, split and sealed correctly |
+| `test_mergesort` | 578 | sorted, same multiset, byte-identical for 1/2/3/5/8 threads |
+| `test_median` | 7 615 | the Hampel filter against a reference, across seams, bursts and bad arguments |
+| `test_shared_memory` | 13 | the results region's bounds and arithmetic |
+| `test_kpi` | 79 | sort/filter/merge timing at 1/2/4 workers, global median two ways |
+
+The evidence is four kinds: **two independent routes** (planar vs interleaved, one
+sample at a time vs whole blocks), an **oracle** (`qsort`), **invariants** (ordered,
+same multiset, stable across thread counts, seals match), and **deliberate bad
+input** (a 3-byte file, a nudged sample, an unknown job id) that must be refused.
+
+## The dataset
+
+Three PyBaMM recordings of one LG M50 cell at 0.5C / 1C / 2C — 60 000 samples ×
+four channels (time, voltage, current, temperature) — with Gaussian noise plus 1.5 %
+impulsive corruption: spikes, bursts of up to 6 samples, dropouts of up to 4. The
+clean signal and the injection mask are kept as the answer key. Per-run statistics
+and the generator's history are in [CHANGELOG.md](CHANGELOG.md).
+
+## Documentation
+
+| Document | What it is for |
 | --- | --- |
-| `--quick` | same 3 recordings at 4 000 samples, for a fast smoke build |
-| `--runs N` | limit the number of recordings |
-| `--samples N` | samples per recording |
-| `--seed N` | outlier RNG seed |
-| `--output-dir DIR` | write artefacts somewhere else |
-| `--no-csv`, `--no-bin`, `--no-plots` | skip the CSV rendering / the binary export / the figures |
+| [IMPLEMENTATION.md](docs/IMPLEMENTATION.md) | every stage, its code, its mechanism, its tests and its measured number |
+| [STUDY-GUIDE.md](docs/STUDY-GUIDE.md) | a plain-language companion organised by milestone, for demos and viva |
+| [REPRODUCE.md](docs/REPRODUCE.md) | the host-side commands that rebuild everything |
+| [TESTING.md](docs/TESTING.md) | the measurement procedures and how to read their output |
+| [FINAL-RUN.md](docs/FINAL-RUN.md) | the six-step board run sheet and its expected output |
+| [CHANGELOG.md](CHANGELOG.md) | what changed, and why |
 
-The generator is split into small modules (`config`, `simulate`, `noise`,
-`dataset`, `csvio`, `plot`) rather than one long script. It stays a package
-because `uv` needs `pyproject.toml` to pin those dependencies anyway, and the
-single command above is unchanged either way.
+## Authors
 
-## What a recording is
+Built for **26ELC331 Real-Time Operating Systems**, Amrita Vishwa Vidyapeetham,
+Coimbatore.
 
-Every recording is one PyBaMM simulation: a single-particle model (`SPM`) with a
-lumped thermal submodel, which yields three sensor channels over time — current,
-terminal voltage and cell temperature. There are **three recordings, one per
-C-rate**, on the same cell at 25 °C, each discharged from full to the lower
-cut-off. Holding the cell, the ambient temperature and the experiment fixed
-leaves the load as the single variable, so the three recordings are directly
-comparable and visibly different:
-
-| Recording | C-rate | Current | Duration | Temperature rise |
-| --- | --- | --- | --- | --- |
-| `Chen2020_c0.5_T25_discharge` | 0.5C | 2.5 A | 2.27 h | 3.5 K |
-| `Chen2020_c1_T25_discharge` | 1C | 5.0 A | 1.25 h | 8.9 K |
-| `Chen2020_c2_T25_discharge` | 2C | 10.0 A | 0.74 h | 19.9 K |
-
-Each recording is resampled onto a fixed 60 000-sample grid, giving a
-`(3, 60000, 4)` tensor over the channels `time_s, current_A, voltage_V,
-temperature_K`.
-
-| Quantity | Value |
-| --- | --- |
-| Recordings | 3 |
-| Samples per recording | 60 000 |
-| Sample rows in total | 180 000 |
-| Duration | 0.74 h – 2.27 h (median 1.25 h) |
-| Temperature rise | 3.5 K – 19.9 K |
-| `.npz` payload | 6.2 MiB = 44 × 64 KiB blocks |
-| CSV files | 4 (3 recording files + 1 index) |
-
-## How it is corrupted
-
-`time_s` is never touched. Each sensor channel gets additive white Gaussian
-noise — voltage 2 mV, current 8 mA, temperature 0.06 K — plus impulsive
-outliers: single-sample spikes, contiguous bursts, and stuck readings that hold
-a constant value. Spikes are 10–40 σ, far outside the noise band, and the outlier
-rate is 1.5 % of samples per channel (2 679 / 2 681 / 2 680 corrupted samples
-for current / voltage / temperature, 8 040 in total). These are exactly the
-artefacts a rolling median filter is meant to remove, and the injected mask is
-stored alongside the corrupted readings so the removal can be measured rather
-than judged by eye.
-
-Noise placement is seeded per run, so regenerating produces the same dataset.
-
-## Cell selection
-
-The recordings use the **LG M50** (`Chen2020`). It is the best-evidenced of the
-PyBaMM parameter sets and has by far the strongest thermal signal, so the
-temperature channel carries a real measurement rather than mostly noise:
-
-| Parameter set | Cell | Capacity | Temperature rise at 2C |
-| --- | --- | --- | --- |
-| `Chen2020` | LG M50 | 5.000 Ah | 19.9 K |
-| `Mohtat2020` | graphite/NMC532 pouch | 5.000 Ah | 5.8 K |
-| `Ai2020` | Enertech cell | 2.280 Ah | 7.4 K |
-
-The last two are supported drop-in alternatives — a one-line change to
-`parameter_sets` in `config.py` — but are not used by default, since three
-recordings at different loads is already enough variance for the median-filter
-workload.
-
-Rejected entirely: `OKane2022` / `ORegan2022` (the same LG M50 cell as
-`Chen2020`, so they would duplicate a cell rather than add variety);
-`Marquis2019`, `Ecker2015`, `NCA_Kim2011` (temperature rise of 0.61 K, 0.23 K
-and 0.01 K — below the 0.06 K noise floor, so the channel would be
-noise-dominated); `Prada2013`, `Ramadass2004`, `Xu2019`, `MSMR_Example` and the
-half-cell sets (no cell volume, cooling area or heat-transfer coefficient, so
-the thermal model cannot be solved); `Sulzer2019` (lead-acid, not lithium-ion).
-
-## Outputs
-
-```
-data/artifacts/
-├── dataset/
-│   ├── battery_sensor_dataset.npz     # clean, noisy, outlier_mask, duration_s, run_ids
-│   ├── metadata.json                  # build config, cell identity, shapes, per-run stats
-│   ├── csv_index.csv                  # manifest of the 3 recording CSVs
-│   ├── csv/<run_id>.csv               # 3 files, one per recording
-│   ├── bin/<run_id>[.truth].bin       # 6 interleaved files
-│   └── bin/channels/r<idx>_<ch>.bin   # 12 per-channel files + manifest.txt
-└── figures/                           # 5 PNGs, shown below
-```
-
-**CSV files — 4 in total**: 3 recording files plus one index. Each recording
-file has 60 000 rows (one sample per row) and 11 columns, so it is
-self-contained and can be read without Python:
-
-```
-sample_index, time_s, current_A, voltage_V, temperature_K,     ← clean / ground truth
-current_A_noisy, voltage_V_noisy, temperature_K_noisy,          ← what the sensor reports
-outlier_current, outlier_voltage, outlier_temperature           ← 1 where a spike was injected
-```
-
-The `.npz` is the primary artefact (compact, exact); the CSVs reproduce it
-column for column.
-
-**Binary files — 18 in total**, in two layouts. Both are headerless,
-little-endian float32.
-
-*Per channel* (12 files + a manifest): `bin/channels/r<index>_<channel>.bin`,
-one flat run of 60 000 samples per channel — `time`, `current`, `voltage`,
-`temperature` — at 240 000 bytes each. `manifest.txt` maps each `r<index>`
-prefix to its recording id. This is the layout `qnx_project/loader.c` reads: a
-whole file is one signal, so a min/max over it is meaningful.
-
-*Interleaved* (6 files): `<run_id>.bin` is the sensor record (AWGN plus
-impulsive outliers, what the service consumes) and `<run_id>.truth.bin` the
-clean ground truth. Fixed 16-byte stride, so a reader seeks straight to sample
-*n* at `n * 16`:
-
-```
-record = [time_s, voltage_V, current_A, temperature_K]     # 4 x float32 LE = 16 bytes
-```
-
-960 000 bytes each, readable straight into `struct { float t, v, i, temp; }`.
-Note the two layouts order their values differently: the interleaved record is
-time/voltage/current/temperature, while the per-channel files carry the dataset's
-own time/current/voltage/temperature order in their filenames. Both layouts are
-declared in `metadata.json` under `binary_export`.
-
-Two caveats worth stating plainly. The `outlier_*` flags are the **injected
-ground truth**, not the output of a detector — no outlier detection is
-implemented yet, so these columns are the answer key, not a result. And the
-median filter exists as a reference implementation used only to draw figure 03;
-nothing filtered is persisted to disk.
-
-## Figures
-
-### 01 — Signal overview
-
-One current, voltage and temperature trace per C-rate, plus a bar chart showing
-how many recordings were produced for each C-rate.
-
-![Sweep coverage and representative current, voltage and temperature traces](data/artifacts/figures/01_signal_overview.png)
-
-### 02 — Noise injection
-
-The key picture: one recording, all three channels, whole recording and zoomed
-in — clean truth, the noisy reading, and every injected outlier marked. This is
-what justifies a median filter: the spikes are large and isolated.
-
-![Ground truth versus noisy sensor readings with injected outliers marked](data/artifacts/figures/02_noise_injection.png)
-
-### 03 — Median filter recovery
-
-The same zoom with a rolling median applied, next to the reconstruction error as
-the kernel widens. Voltage has a clear sweet spot around 9 samples; current and
-temperature keep a residual floor because a median across a step or a ramp is
-biased. Filter output is computed for this figure only and is not saved.
-
-![Rolling median recovery and reconstruction error versus kernel width](data/artifacts/figures/03_median_filter_recovery.png)
-
-### 04 — Noise statistics
-
-Evidence that the corruption is what it claims to be: residuals collapse onto a
-Gaussian, outlier magnitudes sit at 10–40 σ, the realised 1.5 % rate matches the
-configured one, and the noise raises the broadband floor of the voltage
-spectrum.
-
-![Residual normality, outlier magnitudes, realised corruption rate and noise floor](data/artifacts/figures/04_noise_statistics.png)
-
-### 05 — Run gallery
-
-How much the recordings vary: all three voltage traces coloured by C-rate,
-temperature rise against C-rate, the duration spread, and the spike / burst /
-dropout length distribution.
-
-![Voltage family, thermal response, durations and corruption length distribution](data/artifacts/figures/05_run_gallery.png)
+| Author | LinkedIn | GitHub |
+| --- | --- | --- |
+| **Anmol Govindarajapuram Krishnan** | [in/anmolkrish](https://www.linkedin.com/in/anmolkrish/) | [@Anmol-G-K](https://github.com/Anmol-G-K) |
+| **Mauli Rajguru** | [in/maulir](https://www.linkedin.com/in/maulir/) | [@maulir](https://github.com/maulir) |
+| **Sanjay TS** | [in/sanjay-t-s](https://www.linkedin.com/in/sanjay-t-s-b272aa321/) | [@Sanjay5421](https://github.com/Sanjay5421) |
