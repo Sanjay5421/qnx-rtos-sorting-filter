@@ -94,6 +94,14 @@ if [ "${ALLOW_ANY:-0}" != "1" ]; then
 fi
 mkdir -p "$OUT" || exit 1
 MANIFEST=$OUT/sweep.manifest
+if [ -s "$MANIFEST" ] && [ "${ALLOW_MIX:-0}" != "1" ]; then
+    echo "perf-sweep: $OUT already holds a sweep ($MANIFEST is not empty)." >&2
+    echo "Give each sweep its own directory, or this manifest is overwritten and" >&2
+    echo "the earlier sweep's cases lose their map. For example:" >&2
+    echo "  OUT=/var/mnt/perf-$mode sh /bin/perf-sweep.sh $mode" >&2
+    echo "ALLOW_MIX=1 merges into the directory anyway." >&2
+    exit 2
+fi
 : > "$MANIFEST" || exit 1
 
 RUN_INDEX=0
@@ -133,7 +141,7 @@ run_case()
 
     RUN_INDEX=$((RUN_INDEX + 1))
     TOTAL_CASES=$((TOTAL_CASES + 1))
-    case_name=w${width}_t${threads}_${channel}_r${rep}
+    case_name=${mode}_w${width}_t${threads}_${channel}_r${rep}
     case_dir=$OUT/$case_name
 
     mkdir -p "$case_dir" || return 1

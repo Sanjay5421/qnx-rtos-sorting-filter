@@ -113,12 +113,17 @@ def find_npz(explicit: str | None) -> Path:
                      "pass --npz PATH")
 
 
-def read_manifest(root: Path) -> list[dict]:
-    """The board script's sweep.manifest: blank-line separated key=value blocks."""
-    path = root / "sweep.manifest"
+def read_manifest(root: Path, name: str | None = None) -> list[dict]:
+    """A board-script manifest: blank-line separated key=value blocks.
+
+    `name` picks one when the directory holds more than one sweep — a width
+    sweep and a thread sweep copied in side by side, say, each with its own
+    manifest. The default is the script's own `sweep.manifest`.
+    """
+    path = (root / name) if name else (root / "sweep.manifest")
     if not path.exists():
         raise SystemExit(f"filter_sweep: {path} is missing; is this a sweep "
-                         f"directory from perf-sweep.sh?")
+                         f"directory from perf-sweep.sh, and is --manifest right?")
     cases: list[dict] = []
     current: dict = {}
     for line in path.read_text().splitlines():
@@ -298,6 +303,9 @@ def main(argv: list[str]) -> int:
     ap.add_argument("sweep_dir", nargs="?", default=".")
     ap.add_argument("--out", help="where the CSVs and figures go")
     ap.add_argument("--npz", help="the dataset, if it is not in the usual place")
+    ap.add_argument("--manifest",
+                    help="which manifest to read when the directory holds more "
+                         "than one sweep (default: sweep.manifest)")
     args = ap.parse_args(argv[1:])
 
     root = Path(args.sweep_dir).expanduser()
@@ -305,9 +313,9 @@ def main(argv: list[str]) -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     npz = np.load(find_npz(args.npz))
-    cases = read_manifest(root)
+    cases = read_manifest(root, args.manifest)
     if not cases:
-        raise SystemExit("filter_sweep: sweep.manifest lists no cases")
+        raise SystemExit("filter_sweep: the manifest lists no cases")
 
     print(f"sweep      : {root}")
     print(f"cases      : {len(cases)}")
@@ -336,12 +344,15 @@ def main(argv: list[str]) -> int:
 
         medians = read_medians(case_dir)
         if medians is not None:
-            key = tuple((row["block_index"], row["samples"], row["median"],
-                         row["outliers_removed"]) for row in medians)
+            # These columns are of the raw data, so the sweep must leave them
+            # alone. `outliers_removed` is a filter *output* and legitimately
+            # depends on the width, so it is deliberately not compared.
+            key = tuple((row["block_index"], row["samples"], row["median"])
+                        for row in medians)
             if group in medians_by_group and medians_by_group[group] != key:
                 problems.append(f"{case['case']}: block medians differ from the "
-                                f"other cases of {group[1]} (they must not "
-                                f"depend on the width)")
+                                f"other cases of {group[1]} — the medians are of "
+                                f"the raw data and must not move with the width")
             else:
                 medians_by_group[group] = key
 
@@ -419,26 +430,50 @@ def main(argv: list[str]) -> int:
     print(f"channels   : {', '.join(channels)}")
     print(f"threads    : {', '.join(str(t) for t in threads)}")
     print()
-    print(f"{'width':>5} {'channel':<12} {'recall':>7} {'clean':>7} "
+    print(f"{'width':>5} {'threads':>7} {'channel':<12} {'recall':>7} {'clean':>7} "
           f"{'gain':>6} {'filter':>8} {'total':>8}   (ms per block)")
     for width in widths:
-        for channel in channels:
-            sel = [r for r in scored
-                   if r["width"] == width and r["channel"] == channel
-                   and r["rep"] == min(x["rep"] for x in scored
-                                       if x["width"] == width
-                                       and x["channel"] == channel)]
-            if not sel:
+        for workers in threads:
+            for channel in channels:
+                sel = [r for r in scored
+                       if r["width"] == width and r["threads"] == workers
+                       and r["channel"] == channel
+                       and r["rep"] == min(x["rep"] for x in scored
+                                           if x["width"] == width
+                                           and x["threads"] == workers
+                                           and x["channel"] == channel)]
+                if not sel:
+                    continue
+                r = sel[0]
+                recall = f"{100.0 * r['recall']:.2f}%" if r["recall"] is not None else "   —"
+                clean = (f"{100.0 * r['clean_replaced_rate']:.2f}%"
+                         if r["clean_replaced_rate"] is not None else "   —")
+                gain = f"{r['gain']:.2f}x" if r["gain"] is not None else "  —"
+                filt = f"{r['filter_ms']:.2f}" if r["filter_ms"] is not None else "—"
+                total = f"{r['total_ms']:.2f}" if r["total_ms"] is not None else "—"
+                print(f"{width:>5} {workers:>7} {channel:<12} {recall:>7} {clean:>7} "
+                      f"{gain:>6} {filt:>8} {total:>8}")
+
+    # The point of a thread sweep: the sort is parallel and the filter is not,
+    # so this is the whole speedup, and it is much smaller than the sort's own.
+    if len(threads) > 1:
+        print()
+        print("per worker count, mean over the sensor channels "
+              "(voltage, current, temperature):")
+        baseline = None
+        for workers in threads:
+            totals = [r["total_ms"] for r in scored if r["threads"] == workers
+                      and r["channel"] in SENSOR_CHANNELS and r["total_ms"] is not None]
+            sorts = [r["sort_ms"] for r in scored if r["threads"] == workers
+                     and r["channel"] in SENSOR_CHANNELS and r["sort_ms"] is not None]
+            if not totals:
                 continue
-            r = sel[0]
-            recall = f"{100.0 * r['recall']:.2f}%" if r["recall"] is not None else "   —"
-            clean = (f"{100.0 * r['clean_replaced_rate']:.2f}%"
-                     if r["clean_replaced_rate"] is not None else "   —")
-            gain = f"{r['gain']:.2f}x" if r["gain"] is not None else "  —"
-            filt = f"{r['filter_ms']:.2f}" if r["filter_ms"] is not None else "—"
-            total = f"{r['total_ms']:.2f}" if r["total_ms"] is not None else "—"
-            print(f"{width:>5} {channel:<12} {recall:>7} {clean:>7} "
-                  f"{gain:>6} {filt:>8} {total:>8}")
+            total = float(np.mean(totals))
+            sort = float(np.mean(sorts)) if sorts else float("nan")
+            if baseline is None:
+                baseline = total
+            print(f"  threads={workers}: sort {sort:7.3f} ms, whole block {total:7.3f} ms, "
+                  f"speedup {baseline / total:.2f}x")
 
     # --- invariants -----------------------------------------------------------
     print()

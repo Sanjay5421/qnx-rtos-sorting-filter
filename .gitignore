@@ -14,6 +14,11 @@ pi_data/
 data/artifacts/dataset/
 /.metadata/
 
+# Sweep output: a full run is ~100 MiB of case directories, and it is
+# regenerable from the board. Keep the manifests and the server logs (they are
+# the provenance), drop the raw/sorted/filtered arrays.
+/tools/perf/**/*.bin
+
 # Build outputs of RT-MOMS/tests. The .exe rule covers host builds; the bare
 # names would be produced by a target or Linux build with the same Makefile, and
 # .arm by the cross-compile step in REPRODUCE.md section 7.
