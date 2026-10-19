@@ -515,8 +515,84 @@ Function & Purpose \\
 \end{tabular}
 \end{table}
 
+
 \section{Block Loader}
-The block loader (\texttt{block\_loader.c}) aggregates these samples into exact 64 KB blocks (\texttt{PROTO\_BLOCK\_SAMPLES} of 16384 float32 values).
+\label{sec:block-loader}
+
+The block loader (\texttt{block\_loader.c}) sits between the virtual sensor and the client's message transmission. Its job is to assemble the continuous stream of samples from the sensor into the exact 64 KiB blocks required by the protocol, and to attach a descriptor to each block. The block size is strictly defined by the protocol: \texttt{PROTO\_BLOCK\_SAMPLES} is 16,384 samples of 32-bit floats, which equals exactly 65,536 bytes (64 KiB).
+
+\subsection{Handling Multiple File Layouts}
+One of the critical responsibilities of the loader is mapping protocol channels to their physical positions in the file. The dataset provides recordings in two formats: a planar format (one float per sample) and an interleaved format (multiple floats per record). 
+
+The interleaved file stores each record as \texttt{time\_s}, then \texttt{voltage\_V}, \texttt{current\_A} and \texttt{temperature\_K}. Notice that this order differs from the \texttt{PROTO\_CHANNEL\_*} enumeration. To prevent the catastrophic error of sorting the wrong physical signal, the loader centralizes the mapping in a single function. For example, the voltage channel is at index 1 in the file, not index 2.
+
+% SOURCE: block_loader.c, function block_loader_channel_offset()
+\begin{lstlisting}[caption={Mapping the protocol channel to the interleaved file offset in \texttt{block\_loader.c} (\texttt{block\_loader\_channel\_offset})}, label={lst:loader-offset}]
+int block_loader_channel_offset(proto_channel_t channel)
+{
+    switch (channel) {
+    case PROTO_CHANNEL_TIME:        return 0;
+    case PROTO_CHANNEL_VOLTAGE:     return 1;   /* not 2: see the header note */
+    case PROTO_CHANNEL_CURRENT:     return 2;
+    case PROTO_CHANNEL_TEMPERATURE: return 3;
+    default:                        return -1;
+    }
+}
+\end{lstlisting}
+
+To ensure a block is filled in a single, efficient read operation, the loader sets the virtual sensor's \texttt{frame\_samples} field to \texttt{PROTO\_BLOCK\_SAMPLES}. The read-ahead window then spans one whole block, so \texttt{sensor\_read\_block()} returns all 16,384 samples after a single \texttt{fread()}: 64 KiB for a planar file, 256 KiB of four-channel records for an interleaved one.
+
+\subsection{Zero-Padding and the Descriptor}
+The block loader must handle the case where the total recording length is not an exact multiple of 16,384 samples. The final block will be partially filled. Because the entire 64 KiB buffer is transmitted across the QNX message bus to another process, sending uninitialized memory from the stack or heap is a security risk. It also breaks determinism, meaning the checksum would change from run to run.
+
+The loader solves this by zeroing the unused tail of the final block. This guarantees that the block is byte-for-byte reproducible. The block descriptor is then populated with the valid sample count, the sequence number, the first sample index, and a checksum (FNV-1a). Crucially, the checksum is calculated only over the valid samples (\texttt{got}), ignoring the zero-padded tail.
+
+% SOURCE: block_loader.c, function block_loader_next()
+\begin{lstlisting}[caption={Zero-padding the final block and building the descriptor in \texttt{block\_loader.c} (\texttt{block\_loader\_next})}, label={lst:loader-pad}]
+    /*
+     * A short final block has an unused tail. Clear it: the whole 64 KiB block
+     * crosses to another process, and uninitialised bytes should never travel.
+     * It also makes the block reproducible, so two runs over the same
+     * recording produce identical bytes and identical checksums.
+     */
+    if ((uint32_t)got < PROTO_BLOCK_SAMPLES) {
+        memset(&block->samples[got], 0,
+               (size_t)(PROTO_BLOCK_SAMPLES - (uint32_t)got) * sizeof(float));
+    }
+
+    min_value = block->samples[0];
+    max_value = block->samples[0];
+    for (i = 1; i < got; i++) {
+        if (block->samples[i] < min_value) min_value = block->samples[i];
+        if (block->samples[i] > max_value) max_value = block->samples[i];
+    }
+
+    memset(desc, 0, sizeof(*desc));
+    desc->sequence     = (uint32_t)l->sequence;
+    desc->samples      = (uint32_t)got;
+    desc->first_sample = l->samples;
+    desc->rate_hz      = l->rate_hz;
+    desc->channel      = (uint32_t)l->channel;
+    desc->checksum     = proto_checksum(block->samples,
+                                        (size_t)got * sizeof(float));
+    desc->min_value    = min_value;
+    desc->max_value    = max_value;
+
+    l->sequence++;
+    l->samples += (uint64_t)got;
+    return got;
+}
+\end{lstlisting}
+
+\subsection{Verification}
+The correctness of the block loader is verified by comparing the two file layouts. Because the planar and interleaved files carry the exact same recordings, the test suite asserts that reading a planar file and reading an interleaved file through this loader produce \textbf{byte-identical blocks and descriptors}. This proves that the channel offset mapping and read logic are completely independent of the underlying file format.
+
+\begin{figure}[htbp]
+\centering
+% \includegraphics[width=0.9\textwidth]{images/block_loader_flow.pdf}
+\caption{Block loader data flow: reading from the sensor, zero-padding the final block, and populating the descriptor.}
+\label{fig:block-loader}
+\end{figure}
 
 \section{Parallel Merge-Sort}
 \label{sec:mergesort}
@@ -744,15 +820,27 @@ settle any of them. The tests are therefore built to compare against an answer
 computed some other way, and to make the system prove that it refuses what it
 should refuse.
 
+Three words are used throughout, so they are worth defining. A \emph{check} is one
+assertion --- this value equals that one, this call returns $-1$. A \emph{test} is
+a named group of checks exercising one behaviour, and a \emph{suite} is one binary
+that runs a group of tests and prints a verdict. The counting is per check because
+a test that quietly covers half of its cases still passes. ``0 skipped'' means
+every check that could run did run: the payload tests are skipped when the
+generated dataset is absent, so a run quoting zero skipped was made against the
+real recording.
+
 \subsection{Two folds, one set of sources}
 
 The tests run twice, on two very different machines, from exactly the same source
 files.
 
-The \emph{host} fold is a set of plain C programs built with \texttt{gcc}. It is
-fast, it can be instrumented, and it can do the two things the target cannot do
-comfortably: compare against the C library's \texttt{qsort}, and feed malformed
-input on purpose.
+The \emph{host} fold is a set of plain C programs built with \texttt{gcc}. There is
+no test framework: each file in \texttt{RT-MOMS/tests/} includes
+\texttt{test\_util.h}, calls check macros and returns its own exit status, and
+\texttt{make check} builds and runs the six suites in order. It is fast, it can be
+instrumented, and it can do the two things the target cannot do comfortably:
+compare against the C library's \texttt{qsort}, and feed malformed input on
+purpose.
 
 The \emph{board} fold cross-compiles the same sources with
 \texttt{qcc -Vgcc\_ntoaarch64le} and runs them from the boot image on the
@@ -775,7 +863,7 @@ agreement means the behaviour is not an accident of one toolchain.
 Kind & Example & Why it is convincing \\
 \hline
 Two independent routes & planar file versus interleaved record; one sample at a time versus whole blocks & different code paths, so a stride, offset or window-refill mistake makes them disagree \\
-An oracle & \texttt{qsort} on the same values & not our code and not our bug \\
+| An oracle & \texttt{qsort} on the same values; a reference Hampel implementation for the filter & not our code and not our bug \\
 Invariants & output ordered; the multiset unchanged; seals match; byte-identical output for 1, 2, 3, 5 and 8 workers & catches a class of bug rather than one example: a lost value, a duplicated value, a half-merged phase \\
 Deliberate bad input & a 3-byte file, a 6-float record, a NULL path, one nudged sample, a fetch for an unknown job & proves the system refuses instead of quietly doing something wrong \\
 \hline
@@ -799,22 +887,19 @@ Suite & Checks & What it establishes \\
 \texttt{test\_mergesort} & 578 & sorted, the same multiset, byte-identical for 1, 2, 3, 5 and 8 workers, plan line as expected \\
 \texttt{test\_median} & 7\,615 & the Hampel filter against a reference, across block seams, bursts, dropouts and bad arguments \\
 \texttt{test\_shared\_memory} & 13 & the results region's bounds and arithmetic \\
+\texttt{test\_kpi} & 79 & benchmark: sort at 1 / 2 / 4 workers, global median computed two ways \\
 \hline
 \textbf{Total} & \textbf{9\,150} & 0 failed, 0 skipped, on host and on board \\
-\texttt{test\_kpi} & 79 & benchmark: sort at 1 / 2 / 4 workers, global median computed two ways \\
 \hline
 \end{tabular}
 \end{table}
 
 \subsection{The board run}
 
-The output below is taken from the board's console after
-\texttt{test\_outputs.txt} was captured. Each suite prints a line per test and a
-summary; the summaries are quoted here, with the intermediate lines elided.
-
 \noindent\begin{minipage}{\linewidth}
-\begin{lstlisting}[language={}, caption={The six suite summaries, the client
-deadline test and the soak, as printed on the board.}, label={lst:board-summary},
+\begin{lstlisting}[language={}, caption={The board's summary lines, assembled here
+with the suite names added; the screenshots that follow are the console itself.},
+label={lst:board-summary},
 basicstyle=\ttfamily\footnotesize]
 Shared-memory bounds tests: 13 checks, 0 failures
 
@@ -830,8 +915,9 @@ soak: 20 runs, all completed, all with identical medians
 \end{lstlisting}
 \end{minipage}
 
-The screenshots that follow are the console as it was captured, one per suite.
-They are the evidence rather than the summary: the test names scroll past with
+The screenshots that follow are the console as it was captured, one per suite, plus
+the two board scripts, \texttt{client-wait-test.sh} and \texttt{soak.sh}. They are
+the evidence rather than the summary: the test names scroll past with
 their verdicts, and the suites that reject bad input print the refusals they
 provoked --- every one of those lines is followed by \texttt{ok}.
 
@@ -907,6 +993,10 @@ seconds, and with a server that starts three seconds late it connects by itself.
 medians and a stable service time per block.}
 \label{fig:test-soak}
 \end{figure}
+
+One limitation these runs do not settle. The client's wait for the completion pulse
+has no timeout, so a server that died mid-job would leave the client waiting; the
+deadline test exercises the deadline on connection, not on completion.
 
 % ============================================================
 % CHAPTER 4
