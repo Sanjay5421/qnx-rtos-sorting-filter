@@ -1,70 +1,131 @@
-% ============================================================================
-%  26ELC331 Real Time Operating System using QNX -- report template
-%
-%  Converted from "Report Template.docx", which sits beside this file: same
-%  structure, same wording, nothing added. The two images under images/ were
-%  extracted from the .docx and are placed at the sizes the document gave them.
-%
-%  Compile:  latexmk -pdf report_template.tex        (from this directory)
-% ============================================================================
-\documentclass[12pt,a4paper]{report}
+\documentclass[12pt,a4paper,oneside]{report}
 
+% --- Page dimensions ---
+\usepackage[a4paper,margin=1in]{geometry}
+
+% --- Font and text formatting ---
 \usepackage[T1]{fontenc}
 \usepackage[utf8]{inputenc}
+\usepackage{newtxtext,newtxmath}
+\usepackage{setspace}
 \usepackage{graphicx}
+\usepackage{pdflscape}
 \usepackage{amsmath}
+\usepackage{titlesec}
+\usepackage{tocloft}
+\usepackage{hyperref}
 
-% The template's reference list is headed "References", not "Bibliography".
+% --- Hyperref Setup ---
+\hypersetup{
+    colorlinks=true,
+    linkcolor=black,
+    citecolor=blue,
+    urlcolor=blue
+}
+
+% --- Paragraph formatting ---
+\setstretch{1.5}
+\setlength{\parindent}{0.5in}
+\setlength{\parskip}{0pt}
+
+% --- Chapter formatting ---
+\titleformat{\chapter}[display]
+  {\normalfont\bfseries\centering}
+  {\chaptername\ \thechapter}
+  {10pt}
+  {\Large}
+
+\titlespacing*{\chapter}{0pt}{-10pt}{24pt}
+
+% --- Section formatting ---
+\titleformat{\section}
+  {\normalfont\bfseries\large}
+  {\thesection}{1em}{}
+
+\titleformat{\subsection}
+  {\normalfont\bfseries\normalsize}
+  {\thesubsection}{1em}{}
+
+% --- Figure captions ---
+\usepackage{caption}
+\captionsetup{
+  font=small,
+  labelfont=bf,
+  justification=centering
+}
+
+% --- References heading ---
 \renewcommand{\bibname}{References}
+
+% --- Lists and numbering ---
+\setcounter{secnumdepth}{3}
+\setcounter{tocdepth}{3}
 
 \begin{document}
 
-% ---------------------------------------------------------------------------
-% Title page
-% ---------------------------------------------------------------------------
+% ============================================================
+% TITLE PAGE
+% ============================================================
 \begin{titlepage}
-  \centering
-  {\Large\bfseries TITLE OF YOUR PROJECT\par}
-  \vspace{1.5em}
-  A Report\par
-  \vspace{1.5em}
-  Submitted for the course\par
-  26ELC331 Real Time Operating system using QNX\par
-  \vspace{1.5em}
-  by\par
-  \vspace{0.5em}
-  {\bfseries WRITE YOUR NAME\par}
-  \vspace{2em}
-  \includegraphics[width=4.952in,height=1.331in]{images/image1.png}\par
-  \vspace{1.5em}
-  YOUR DEPARTMENT / CENTRE NAME\par
-  \vspace{0.5em}
-  {\bfseries AMRITA VISHWA VIDYAPEETHAM\par}
-  \vspace{0.5em}
-  COIMBATORE CAMPUS (INDIA)\par
-  \vspace{1.5em}
-  Month Year \textit{(to be updated as per your defense date during final
-  submission)}\par
+\thispagestyle{empty}
+\centering
+
+\vspace*{0.2in}
+
+{\Large\bfseries Real-Time Multi-Core Sorting and Median Filter Service\par}
+
+\vspace{0.25in}
+
+{\large A Report\par}
+
+\vspace{0.2in}
+
+Submitted for the course\par
+\textbf{26ELC331 Real Time Operating System using QNX}\par
+
+\vspace{0.2in}
+
+by\par
+\vspace{0.1in}
+{\large\bfseries Anmol Govindarajapuram Krishnan (CB.EN.U4EEE23103)\\
+Mauli Rajguru (CB.EN.U4EEE23120)\\
+Sanjay TS (CB.EN.U4EEE23136)\par}
+
+\vspace{0.3in}
+
+\includegraphics[
+  width=4.2in,
+  height=1.1in,
+  keepaspectratio
+]{images/image1.png}\par
+
+\vspace{2.3in}
+
+DEPARTMENT OF ELECTRONICS AND COMMUNICATION ENGINEERING\par
+
+\vspace{0.1in}
+
+{\large\bfseries AMRITA VISHWA VIDYAPEETHAM\par}
+
+\vspace{0.08in}
+
+COIMBATORE CAMPUS (INDIA)\par
+
+\vspace{0.4in}
+
+October 17, 2026\par
+
 \end{titlepage}
 
-% ---------------------------------------------------------------------------
-% Letterhead page and Contents
-% ---------------------------------------------------------------------------
-\begin{center}
-  YOUR DEPARTMENT / CENTRE NAME\par
-  \vspace{0.5em}
-  {\bfseries AMRITA VISHWA VIDYAPEETHAM\par}
-  \vspace{0.5em}
-  COIMBATORE CAMPUS\par
-\end{center}
-\vspace{2em}
-
+% ============================================================
+% PRELIMINARY PAGES
+% ============================================================
+\clearpage
 \pagenumbering{roman}
+\setcounter{page}{1}
+
 \tableofcontents
 
-% ---------------------------------------------------------------------------
-% The lists the Contents above refers to
-% ---------------------------------------------------------------------------
 \clearpage
 \addcontentsline{toc}{chapter}{List of Figures}
 \listoffigures
@@ -76,103 +137,249 @@
 \clearpage
 \addcontentsline{toc}{chapter}{Abbreviations}
 \chapter*{Abbreviations}
-TT -- Truth Table
 
-ANF -- Algebraic Normal Form
+\begin{description}
+  \item[AWGN] Additive White Gaussian Noise
+  \item[BSP] Board Support Package
+  \item[FNV] Fowler--Noll--Vo
+  \item[IOV] Input/Output Vector
+  \item[IPC] Inter-Process Communication
+  \item[MAD] Median Absolute Deviation
+  \item[POSIX] Portable Operating System Interface
+  \item[QNX] QNX Neutrino RTOS
+  \item[RMSE] Root Mean Square Error
+  \item[RTOS] Real-Time Operating System
+  \item[SPM] Single Particle Model
+\end{description}
 
 \clearpage
-\addcontentsline{toc}{chapter}{List of symbols}
-\chapter*{List of symbols}
-$F_q$ -- Finite field with $q$ elements
+\addcontentsline{toc}{chapter}{List of Symbols}
+\chapter*{List of Symbols}
 
-$\oplus$ -- Exclusive or (XOR)
+\begin{description}
+  \item[$\sigma$] Standard deviation (noise parameter)
+  \item[$w$] Filter width (window size in samples)
+  \item[$f_s$] Sampling frequency (Hz)
+  \item[$N$] Number of samples / block size
+  \item[$k$] Number of partitions / worker threads
+\end{description}
 
-% ---------------------------------------------------------------------------
-% Chapters
-% ---------------------------------------------------------------------------
+% ============================================================
+% MAIN REPORT
+% ============================================================
 \clearpage
 \pagenumbering{arabic}
+\setcounter{page}{1}
 
 \chapter{Introduction}
 
-\section{title of first section in this chapter}
+\section{Background and Motivation}
 
-A literature review is much more than a list of separate reviews of articles
-and books. They are common and very important in the sciences. A literature
-review is a critical, analytical summary and synthesis of the current knowledge
-of a topic. It should compare and relate different theories, findings, and so
-on, rather than just summarize them individually. It should also have a
-particular focus or theme to organize the review. It does not have to be an
-exhaustive account of everything published on the topic. But it should discuss
-all the more significant academic literature important for that focus.
+Embedded systems used for real-time data acquisition often need to process large amounts of sensor data while meeting strict timing requirements. Multi-core processors help meet these demands by allowing computational tasks to run in parallel. However, making effective use of multiple cores requires proper task distribution and synchronization, especially in systems where predictable execution time and responsiveness are important.
 
-\section{second section if any}
+Sensor data may also contain unwanted variations, such as sudden spikes, bursts of abnormal readings, or dropouts caused by electromagnetic interference, sensor faults, or changes in operating conditions. Identifying and removing these outliers is important for obtaining reliable results during statistical analysis. Combining this filtering process with data sorting increases the computational workload. In a Real-Time Operating System (RTOS), these operations must be handled efficiently without affecting the system's ability to respond to inter-process communication (IPC) requests and hardware interrupts.
 
-\section{third section if any}
+\section{Project Objectives}
 
-\section{fourth section if any}
+This project focuses on developing a real-time client-server system using the QNX RTOS and deploying it on a Raspberry Pi 4. The system is designed to transfer unsorted floating-point time-series data from a client to a server in blocks of at least 64 KB for processing. The server performs two main operations:
 
-\section{fifth section if any}
+\begin{enumerate}
+    \item \textbf{Parallel Sorting:} A parallel Merge-Sort algorithm is implemented using multiple POSIX worker threads. Mutexes and condition variables are used to coordinate thread execution and synchronization during the sorting and merging stages.
 
+    \item \textbf{Rolling Median Filtering:} A robust rolling median filter (Hampel filter) is applied to identify and remove outliers from the time-series data. The filter uses local median and median absolute deviation (MAD) values to detect abnormal readings while preserving the underlying signal.
+\end{enumerate}
+
+After processing, the server notifies the client through a QNX pulse event containing the calculated median and a descriptor specifying the relevant memory offset. The processed arrays remain in shared memory, allowing the client to access the results without requiring another complete data transfer.
+
+\section{Workload and Dataset}
+
+The system is evaluated using a synthetic dataset generated offline with PyBaMM, a Python-based battery modelling package. The dataset contains battery measurements, including current, voltage, and temperature, representing a simulated discharge cycle. To evaluate the ability of the filtering algorithm to detect abnormal readings, controlled noise and outliers are introduced into the data.
+
+The dataset includes the following types of corruption:
+
+\begin{itemize}
+    \item \textbf{Gaussian Noise:} Additive white Gaussian noise is introduced into the measurements to simulate variations in sensor readings. Example noise levels include 2 mV for voltage and 8 mA for current.
+
+    \item \textbf{Impulsive Outliers:} Outliers are introduced in the form of sudden spikes, consecutive bursts, and stuck readings. These outliers are introduced at random and occur at a rate of 1.5\%. A ground-truth mask is also maintained to identify the injected outliers and evaluate the filtering performance.
+\end{itemize}
+
+This dataset provides a controlled environment for evaluating the sorting and filtering algorithms under different data conditions. It also allows the results to be compared against the known locations of the injected outliers.
+
+\newpage
+
+\section{Report Structure}
+
+The remainder of this report is organized into four chapters:
+
+\begin{itemize}
+    \item \textbf{Chapter 2 (System Overview)} presents the system architecture, including the block diagram, data flow, and sequence of messages exchanged between the client and server.
+
+    \item \textbf{Chapter 3 (Process Implementation)} explains the implementation of the parallel Merge-Sort algorithm, the rolling median filter, and the QNX IPC mechanisms used for communication and data sharing, including IOV transfers, pulses, and shared memory.
+
+    \item \textbf{Chapter 4 (Results and Discussions)} evaluates the system's performance through thread-scaling experiments, filtering accuracy measurements, and execution-time analysis on the Raspberry Pi 4.
+
+    \item \textbf{Chapter 5 (Conclusion)} summarizes the project outcomes and discusses possible improvements and directions for future work.
+\end{itemize}
+
+% ============================================================
+% CHAPTER 2
+% ============================================================
 \chapter{System Overview}
 
 \section{Introduction}
+This chapter provides a high-level overview of the system architecture. It describes the interaction between the client and server, the flow of data, and the communication mechanisms utilized within the QNX RTOS.
 
-\section{Block diagram and description}
+\section{System Architecture and Block Diagram}
+The system is based on a client-server model running on QNX. The client reads data from a virtual sensor and offloads it in 64 KB blocks to the server. The server utilizes a multi-threaded approach to sort the data and apply a Hampel filter. The results are written to a shared memory region.
 
-\section{Flow chart of different processes, Data flow diagram}
-
-\subsection{write y}
-
-% The next two lines are the template's own bold placeholders, kept as text so
-% they do not add entries of their own.
-\textbf{subsection if any}
-
-\textbf{Is a subsubsection if any} Molucular biology $\lambda = 4a^2 \quad
-\lambda = 4a_{23} \quad a_2\, a_D b$
-
-\begin{figure}[htbp]
+\begin{landscape}
+\begin{figure}[p]
   \centering
-  \includegraphics[width=1.9167in,height=1.2708in]{images/image2.jpg}
-  \caption{This is my figure}
+  \includegraphics[width=\linewidth,height=0.85\textheight,keepaspectratio]{images/block_diagram.pdf}
+  \caption{System architecture: the client subsystem, the QNX IPC paths, the shared
+  results region and the server subsystem.}
+  \label{fig:block-diagram}
 \end{figure}
+\end{landscape}
 
-where is he going to this paper is written by [1] some author [2]
+\section{Client-Server Communication Sequence}
+Communication between the two processes follows a strict sequence to ensure data integrity and asynchronous notification. 
+\begin{enumerate}
+    \item The client connects to the server using \texttt{name\_open}.
+    \item The client sends a 64 KB block using an IOV message (\texttt{MsgSendv}).
+    \item The server validates the block, sends an acknowledgement, and queues the job.
+    \item Once processing is complete, the server sends a QNX pulse back to the client.
+    \item The client retrieves the result descriptor using a fetch message.
+\end{enumerate}
 
-\subsection{your sub section if any}
+\begin{landscape}
+\begin{figure}[p]
+  \centering
+  \includegraphics[width=\linewidth,height=0.85\textheight,keepaspectratio]{images/client_diagram.pdf}
+  \caption{Client subsystem: the interleaved recording, the virtual sensor, the block
+  assembler and the client controller.}
+  \label{fig:client-diagram}
+\end{figure}
+\end{landscape}
 
-\subsection{This is your subsection}
+\begin{landscape}
+\begin{figure}[p]
+  \centering
+  \includegraphics[width=\linewidth,height=0.85\textheight,keepaspectratio]{images/server_diagram.pdf}
+  \caption{Server subsystem: the IPC request dispatcher, the parallel merge-sort
+  engine and the rolling median filter.}
+  \label{fig:server-diagram}
+\end{figure}
+\end{landscape}
 
+\section{Data Flow Diagram}
+The data starts as raw binary files on disk, is loaded by the client, transferred over the QNX message passing kernel, sorted and filtered, and finally written into a mapped shared memory region.
+
+\begin{landscape}
+\begin{figure}[p]
+  \centering
+  \includegraphics[width=\linewidth,height=0.85\textheight,keepaspectratio]{images/dataflow.pdf}
+  \caption{Data flow through the service: from the recording on disk, through the
+  sensor and block loader, across the message bus, into the shared results region.}
+  \label{fig:dataflow}
+\end{figure}
+\end{landscape}
+
+% ============================================================
+% CHAPTER 3
+% ============================================================
 \chapter{Process Implementation}
 
-\section{title of first section of this chap}
+\section{Introduction}
+This chapter details the implementation of the core algorithms, the data structures, and the QNX-specific mechanisms used to build the service.
 
+\section{Virtual Sensor and Block Loader}
+The virtual sensor (\texttt{sensor.c}) replays the PyBaMM dataset from a binary file, simulating a live sensor. The block loader (\texttt{block\_loader.c}) aggregates these samples into exact 64 KB blocks (\texttt{PROTO\_BLOCK\_SAMPLES} of 16384 float32 values).
+
+\section{Parallel Merge-Sort}
+The server sorts each block using a parallel Merge-Sort algorithm. The sort is partitioned across multiple POSIX worker threads. A mutex and two condition variables (\texttt{work\_ready}, \texttt{phase\_done}) are used to synchronize the phases, ensuring that merge operations only begin after all preceding partition tasks are complete.
+
+\section{Rolling Median Filter (Hampel Filter)}
+To remove outliers, the server applies a Hampel-style rolling median filter. The filter calculates the median and Median Absolute Deviation (MAD) of a sliding window. If a sample deviates from the median by more than a configurable threshold (4.0 sigma), it is replaced. This preserves legitimate signal edges while removing sudden spikes.
+
+\section{QNX IPC Mechanisms}
+\subsection{Message Passing and IOV}
+Large data blocks are transferred using \texttt{MsgSendv} (Input/Output Vectors) to avoid copying the 64 KB buffer into a single contiguous message.
+
+\subsection{QNX Pulses and Asynchronous Notification}
+Upon completion, the server sends a pulse. Because a pulse value is limited to 32 bits, the float representation of the calculated median is bit-cast directly into the pulse payload. The pulse code carries the Job ID.
+
+\subsection{Shared Memory}
+To avoid sending the large processed arrays back over IPC, the server maps a named shared memory region (\texttt{/dev/shmem/sortmed-results}). The server writes the sorted and filtered arrays directly into this region, and the client maps it read-only to retrieve the results.
+
+% ============================================================
+% CHAPTER 4
+% ============================================================
 \chapter{Results and Discussions}
 
-\section{title of first section of this chap}
+\section{Experimental Setup}
+This section describes the environment and the dataset used for the performance evaluations on the Raspberry Pi 4 board.
 
-\chapter{Conclusion and Scope for further Research}
+\section{Filter Quality and Outlier Removal (Width Sweep)}
+This section presents the quality of the Hampel filter across different window widths against the ground-truth mask.
 
-% ---------------------------------------------------------------------------
-% Appendix
-% ---------------------------------------------------------------------------
-\appendix
-\chapter{title of appendix}
+\textit{[Insert Figure: width\_quality.png Here]}
 
-% ---------------------------------------------------------------------------
-% References
-% ---------------------------------------------------------------------------
+\textit{[Insert Figure: error\_map.png Here]}
+
+\section{Processing Cost and Timing Analysis}
+This section discusses the execution time per 64 KB block and how it scales with the filter width.
+
+\textit{[Insert Figure: width\_cost.png Here]}
+
+\textit{[Insert Figure: width\_tradeoff.png Here]}
+
+\section{Parallel Sorting Performance}
+This section briefly evaluates the execution time and speedup achieved by the parallel merge-sort on the four cores of the Raspberry Pi 4.
+
+\section{System Overhead and IPC}
+This section discusses the latency introduced by the QNX IPC mechanisms (message passing and shared memory).
+
+% ============================================================
+% CHAPTER 5
+% ============================================================
+\chapter{Conclusion and Scope for Further Research}
+
+\section{Conclusion}
+The project successfully implemented a real-time client-server architecture on QNX. The system demonstrated effective parallel sorting using POSIX threads and robust outlier removal using a Hampel filter. The use of QNX pulses and shared memory provided an efficient, low-latency method for data transfer and asynchronous notification.
+
+\section{Scope for Further Research}
+Future work could include:
+\begin{itemize}
+    \item Integrating a live hardware sensor (e.g., via I2C or SPI) instead of a virtual file-based sensor.
+    \item Implementing dynamic thread allocation based on the current system load.
+    \item Exploring alternative sorting algorithms (e.g., Radix Sort) for floating-point data.
+    \item Adding a graphical user interface (GUI) for live monitoring of the metrics.
+\end{itemize}
+
+% ============================================================
+% REFERENCES
+% ============================================================
+\clearpage
 \addcontentsline{toc}{chapter}{References}
+
 \begin{thebibliography}{9}
 
-\bibitem{ref1}
-M. X, M. Y, M. Z, and Narra, ``Nano hydroxyapatite structured at the nanometre
-scale,'' \textit{CHEST Journal}, vol. 108, no. 1, pp. 73--77, 1995.
+\bibitem{qnx}
+QNX Software Systems,
+``QNX Neutrino RTOS Programmer's Guide,''
+BlackBerry Limited, 2023.
 
-\bibitem{ref2}
-M. X, M. Y, M. Z, and Marcos, ``Linearity testing in characteristic three,''
-\textit{Information Theory, IEEE Transactions on}, vol. 42, no. 6,
-pp. 1781--1795, 1996.
+\bibitem{pybamm}
+V. Sulzer, S. G. Marquis, R. Timms, M. Robinson, and D. A. Howey,
+``Python Battery Mathematical Modelling (PyBaMM),''
+\textit{Journal of Open Research Software}, vol. 9, no. 1, 2021.
+
+\bibitem{hampel}
+F. R. Hampel,
+``The influence curve and its role in robust estimation,''
+\textit{Journal of the American Statistical Association},
+vol. 69, no. 346, pp. 383--393, 1974.
 
 \end{thebibliography}
 
