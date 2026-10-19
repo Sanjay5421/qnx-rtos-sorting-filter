@@ -301,10 +301,10 @@ test_protocol             # the message definition
 | Binary | Host result | Seen on the board so far |
 | --- | --- | --- |
 | `test_sensor /data` | 642 checks, 0 failed, 0 skipped | reached `test_real_block_partition`, tail not captured |
-| `test_protocol` | 137 checks, 0 failed, 0 skipped | 82 with the earlier image (before the shared-region tests) |
+| `test_protocol` | 186 checks, 0 failed, 0 skipped | 82 with the earlier image (before the shared-region tests) |
 | `test_block_loader /data` | 116 checks, 0 failed, 0 skipped | 116, 0 failed, 0 skipped |
 | `test_mergesort /data` | 578 checks, 0 failed, 0 skipped | 578, 0 failed, 0 skipped |
-| `test_median` | 7551 checks, 0 failed, 0 skipped | not yet |
+| `test_median` | 7615 checks, 0 failed, 0 skipped | not yet |
 | `test_shared_memory` | 13 checks, 0 failures | not yet |
 | `test_kpi` | 79 checks, 0 failures; sort 0.872 / 0.515 / 0.334 ms per block at 1 / 2 / 4 workers (2.61×), filter 0.59 ms, global merge 0.53 ms | not yet |
 
@@ -318,7 +318,7 @@ test_protocol             # the message definition
 | The second channel hangs after `job=4`, nothing after it | The image predates the per-job client resolution (section 1): its pulse goes to the previous client's dead connection. Restart the server before each channel, or flash the current image |
 | `mount: Can't mount /var/mnt (type dos)` | The device name is wrong. Use the `t…` partition that `ls /dev/sd*` shows (`/dev/sd0t12` on the current card); if it still refuses, start the module directly: `/lib/dll/fs-dos.so /dev/sd0t12 /var/mnt` |
 | `mkdir: '/tmp/mnt': Function not implemented` | `/tmp` is `/dev/shmem`, and shmem has no directories. Create the mount point under `/var` instead — section 3 uses `/var/mnt` |
-| `client: name_open server (start server first)` | The server was not up yet. Start it (section 2) and re-run the client — it makes a single connection attempt, it does not retry |
+| `client: no server named 'sortmed' after 10.0 s (N attempts)` | Nothing answered `name_open` for ten seconds: the server is not running. The client waits by itself, so starting it (section 2) within those ten seconds carries the same run on; if the client has already given up, start the server and re-run it |
 | `client: submit … rejected: …` | The server refused the block: `checksum` = it arrived damaged, `version` = the two sides disagree, `busy` = all four result slots are taken, `argument` = malformed header |
 | `client: shared-memory checksum mismatch` | The arrays changed between the server writing them and the client reading them — treat the run as invalid and run it again |
 | `perror` on `raw.bin` / `sorted.bin` / … | The current directory is not writable. `cd /tmp` and re-run |
