@@ -300,15 +300,27 @@ test_protocol             # the message definition
 
 | Binary | Host result | Seen on the board so far |
 | --- | --- | --- |
-| `test_sensor /data` | 642 checks, 0 failed, 0 skipped | reached `test_real_block_partition`, tail not captured |
-| `test_protocol` | 186 checks, 0 failed, 0 skipped | 82 with the earlier image (before the shared-region tests) |
-| `test_block_loader /data` | 116 checks, 0 failed, 0 skipped | 116, 0 failed, 0 skipped |
-| `test_mergesort /data` | 578 checks, 0 failed, 0 skipped | 578, 0 failed, 0 skipped |
-| `test_median` | 7615 checks, 0 failed, 0 skipped | not yet |
-| `test_shared_memory` | 13 checks, 0 failures | not yet |
-| `test_kpi` | 79 checks, 0 failures; sort 0.872 / 0.515 / 0.334 ms per block at 1 / 2 / 4 workers (2.61×), filter 0.59 ms, global merge 0.53 ms | not yet |
+| `test_sensor /data` | 642 checks, 0 failed, 0 skipped | 642, 0 failed, 0 skipped (this image) |
+| `test_protocol` | 186 checks, 0 failed, 0 skipped | 186, 0 failed, 0 skipped (this image); 82 with the earlier one |
+| `test_block_loader /data` | 116 checks, 0 failed, 0 skipped | 116, 0 failed, 0 skipped (this image) |
+| `test_mergesort /data` | 578 checks, 0 failed, 0 skipped | 578, 0 failed, 0 skipped (this image) |
+| `test_median` | 7615 checks, 0 failed, 0 skipped | 7615, 0 failed, 0 skipped (this image) |
+| `test_shared_memory` | 13 checks, 0 failures | 13, 0 failures (this image) |
+| `test_kpi` | 79 checks, 0 failures; sort 0.872 / 0.515 / 0.334 ms per block at 1 / 2 / 4 workers (2.61×), filter 0.59 ms, global merge 0.53 ms | 79, 0 failures (this image); sort 3.010 / 1.631 / 1.011 ms (2.98×), filter 3.81 ms clean and 3.84 ms spiked, global merge 1.408 ms for 65536 samples |
 
 `0 failed` **and** `0 skipped` together mean the suite ran *and* found its payload.
+
+Every suite the host runs now has a board counterpart from the same image, and
+the counts agree exactly: 9 150 checks on the host (642 sensor + 186 protocol +
+116 loader + 578 mergesort + 7 615 median + 13 shared memory) against the same
+9 150 on the board, plus `test_kpi`'s 79 in both places.
+
+The board's KPI times came out about a third slower than the ones recorded in
+`IMPLEMENTATION.md` §12 — 3.010 against 2.278 ms per block at one worker, with
+the scaling unchanged (2.98× against 3.01×). The only source change since those
+numbers was the identification comment, so that gap is the board's clock or
+thermal state rather than the code; the `perf:` stage lines the service now
+prints are the ones to quote for the report.
 
 ## 6. If something goes wrong
 
