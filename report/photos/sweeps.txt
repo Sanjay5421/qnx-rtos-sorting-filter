@@ -1,0 +1,178 @@
+# ls /dev/sd*
+/dev/sd0  /dev/sd0t12
+# mount -t dos /dev/sd0t12 /var/mnt
+# sh /bin/perf-sweep.sh width
+perf-sweep: mode=width out=/var/mnt/perf reps=3 channels='voltage current temperature time'
+perf-sweep: widths='3 5 7 9 11 13 15 21 31' (one server, width per submit)
+perf-sweep: payload=/data/bin/Chen2020_c1_T25_discharge.bin (interleaved, 100 Hz)
+  [1] w3_t4_voltage_r1
+  [2] w3_t4_voltage_r2
+  [3] w3_t4_voltage_r3
+  [4] w3_t4_current_r1
+  [5] w3_t4_current_r2
+  [6] w3_t4_current_r3
+  [7] w3_t4_temperature_r1
+  [8] w3_t4_temperature_r2
+  [9] w3_t4_temperature_r3
+  [10] w3_t4_time_r1
+  [11] w3_t4_time_r2
+  [12] w3_t4_time_r3
+  [13] w5_t4_voltage_r1
+  [14] w5_t4_voltage_r2
+  [15] w5_t4_voltage_r3
+  [16] w5_t4_current_r1
+  [17] w5_t4_current_r2
+  [18] w5_t4_current_r3
+  [19] w5_t4_temperature_r1
+  [20] w5_t4_temperature_r2
+  [21] w5_t4_temperature_r3
+  [22] w5_t4_time_r1
+  [23] w5_t4_time_r2
+  [24] w5_t4_time_r3
+  [25] w7_t4_voltage_r1
+  [26] w7_t4_voltage_r2
+  [27] w7_t4_voltage_r3
+  [28] w7_t4_current_r1
+  [29] w7_t4_current_r2
+  [30] w7_t4_current_r3
+  [31] w7_t4_temperature_r1
+  [32] w7_t4_temperature_r2
+  [33] w7_t4_temperature_r3
+  [34] w7_t4_time_r1
+  [35] w7_t4_time_r2
+  [36] w7_t4_time_r3
+  [37] w9_t4_voltage_r1
+  [38] w9_t4_voltage_r2
+  [39] w9_t4_voltage_r3
+  [40] w9_t4_current_r1
+  [41] w9_t4_current_r2
+  [42] w9_t4_current_r3
+  [43] w9_t4_temperature_r1
+  [44] w9_t4_temperature_r2
+  [45] w9_t4_temperature_r3
+  [46] w9_t4_time_r1
+  [47] w9_t4_time_r2
+  [48] w9_t4_time_r3
+  [49] w11_t4_voltage_r1
+  [50] w11_t4_voltage_r2
+  [51] w11_t4_voltage_r3
+  [52] w11_t4_current_r1
+  [53] w11_t4_current_r2
+  [54] w11_t4_current_r3
+  [55] w11_t4_temperature_r1
+  [56] w11_t4_temperature_r2
+  [57] w11_t4_temperature_r3
+  [58] w11_t4_time_r1
+  [59] w11_t4_time_r2
+  [60] w11_t4_time_r3
+  [61] w13_t4_voltage_r1
+  [62] w13_t4_voltage_r2
+  [63] w13_t4_voltage_r3
+  [64] w13_t4_current_r1
+  [65] w13_t4_current_r2
+  [66] w13_t4_current_r3
+  [67] w13_t4_temperature_r1
+  [68] w13_t4_temperature_r2
+  [69] w13_t4_temperature_r3
+  [70] w13_t4_time_r1
+  [71] w13_t4_time_r2
+  [72] w13_t4_time_r3
+  [73] w15_t4_voltage_r1
+  [74] w15_t4_voltage_r2
+  [75] w15_t4_voltage_r3
+  [76] w15_t4_current_r1
+  [77] w15_t4_current_r2
+  [78] w15_t4_current_r3
+  [79] w15_t4_temperature_r1
+  [80] w15_t4_temperature_r2
+  [81] w15_t4_temperature_r3
+  [82] w15_t4_time_r1
+  [83] w15_t4_time_r2
+  [84] w15_t4_time_r3
+  [85] w21_t4_voltage_r1
+  [86] w21_t4_voltage_r2
+  [87] w21_t4_voltage_r3
+  [88] w21_t4_current_r1
+  [89] w21_t4_current_r2
+  [90] w21_t4_current_r3
+  [91] w21_t4_temperature_r1
+  [92] w21_t4_temperature_r2
+  [93] w21_t4_temperature_r3
+  [94] w21_t4_time_r1
+  [95] w21_t4_time_r2
+  [96] w21_t4_time_r3
+  [97] w31_t4_voltage_r1
+  [98] w31_t4_voltage_r2
+  [99] w31_t4_voltage_r3
+  [100] w31_t4_current_r1
+  [101] w31_t4_current_r2
+  [102] w31_t4_current_r3
+  [103] w31_t4_temperature_r1
+  [104] w31_t4_temperature_r2
+  [105] w31_t4_temperature_r3
+  [106] w31_t4_time_r1
+  [107] w31_t4_time_r2
+  [108] w31_t4_time_r3
+perf-sweep: done, 108 cases in /var/mnt/perf
+perf-sweep: copy it back and score with
+  uv run python tools/filter_sweep.py <out_dir> --out run-figures/perf
+
+
+
+
+# sh /bin/perf-sweep.sh threads
+perf-sweep: mode=threads out=/var/mnt/perf reps=3 channels='voltage current temperature time'
+perf-sweep: threads='1 2 3 4' at width 9
+perf-sweep: payload=/data/bin/Chen2020_c1_T25_discharge.bin (interleaved, 100 Hz)
+  [1] w9_t1_voltage_r1
+  [2] w9_t1_voltage_r2
+  [3] w9_t1_voltage_r3
+  [4] w9_t1_current_r1
+  [5] w9_t1_current_r2
+  [6] w9_t1_current_r3
+  [7] w9_t1_temperature_r1
+  [8] w9_t1_temperature_r2
+  [9] w9_t1_temperature_r3
+  [10] w9_t1_time_r1
+  [11] w9_t1_time_r2
+  [12] w9_t1_time_r3
+  [13] w9_t2_voltage_r1
+  [14] w9_t2_voltage_r2
+  [15] w9_t2_voltage_r3
+  [16] w9_t2_current_r1
+  [17] w9_t2_current_r2
+  [18] w9_t2_current_r3
+  [19] w9_t2_temperature_r1
+  [20] w9_t2_temperature_r2
+  [21] w9_t2_temperature_r3
+  [22] w9_t2_time_r1
+  [23] w9_t2_time_r2
+  [24] w9_t2_time_r3
+  [25] w9_t3_voltage_r1
+  [26] w9_t3_voltage_r2
+  [27] w9_t3_voltage_r3
+  [28] w9_t3_current_r1
+  [29] w9_t3_current_r2
+  [30] w9_t3_current_r3
+  [31] w9_t3_temperature_r1
+  [32] w9_t3_temperature_r2
+  [33] w9_t3_temperature_r3
+  [34] w9_t3_time_r1
+  [35] w9_t3_time_r2
+  [36] w9_t3_time_r3
+  [37] w9_t4_voltage_r1
+  [38] w9_t4_voltage_r2
+  [39] w9_t4_voltage_r3
+  [40] w9_t4_current_r1
+  [41] w9_t4_current_r2
+  [42] w9_t4_current_r3
+  [43] w9_t4_temperature_r1
+  [44] w9_t4_temperature_r2
+  [45] w9_t4_temperature_r3
+  [46] w9_t4_time_r1
+  [47] w9_t4_time_r2
+  [48] w9_t4_time_r3
+perf-sweep: done, 48 cases in /var/mnt/perf
+perf-sweep: copy it back and score with
+  uv run python tools/filter_sweep.py <out_dir> --out run-figures/perf
+# 

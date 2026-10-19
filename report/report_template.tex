@@ -1,9 +1,9 @@
 \documentclass[12pt,a4paper,oneside]{report}
 
-% --- Page dimensions ---
+%  Page dimensions 
 \usepackage[a4paper,margin=1in]{geometry}
 
-% --- Font and text formatting ---
+%  Font and text formatting 
 \usepackage[T1]{fontenc}
 \usepackage[utf8]{inputenc}
 \usepackage{newtxtext,newtxmath}
@@ -31,7 +31,7 @@
 \usepackage{tocloft}
 \usepackage{hyperref}
 
-% --- Hyperref Setup ---
+%  Hyperref Setup 
 \hypersetup{
     colorlinks=true,
     linkcolor=black,
@@ -39,12 +39,12 @@
     urlcolor=blue
 }
 
-% --- Paragraph formatting ---
+%  Paragraph formatting 
 \setstretch{1.5}
 \setlength{\parindent}{0.5in}
 \setlength{\parskip}{0pt}
 
-% --- Chapter formatting ---
+%  Chapter formatting 
 \titleformat{\chapter}[display]
   {\normalfont\bfseries\centering}
   {\chaptername\ \thechapter}
@@ -53,7 +53,7 @@
 
 \titlespacing*{\chapter}{0pt}{-10pt}{24pt}
 
-% --- Section formatting ---
+%  Section formatting 
 \titleformat{\section}
   {\normalfont\bfseries\large}
   {\thesection}{1em}{}
@@ -62,7 +62,7 @@
   {\normalfont\bfseries\normalsize}
   {\thesubsection}{1em}{}
 
-% --- Figure captions ---
+%  Figure captions 
 \usepackage{caption}
 \captionsetup{
   font=small,
@@ -70,10 +70,10 @@
   justification=centering
 }
 
-% --- References heading ---
+%  References heading 
 \renewcommand{\bibname}{References}
 
-% --- Lists and numbering ---
+%  Lists and numbering 
 \setcounter{secnumdepth}{3}
 \setcounter{tocdepth}{3}
 
@@ -356,8 +356,8 @@ one expression, where \texttt{next} is the sample the sensor is about to deliver
 \end{equation}
 
 A planar file is \texttt{stride} 1 and \texttt{offset} 0, so sample $i$ is float
-$i$. An interleaved file is four floats per record --- time, voltage, current,
-temperature --- so sample $i$ of the voltage channel is float $4i + 1$: record 1
+$i$. An interleaved file is four floats per record  time, voltage, current,
+temperature  so sample $i$ of the voltage channel is float $4i + 1$: record 1
 is float 5, byte 20 of the file. The three unused floats of each record are read
 from disk and discarded; a channel other than the selected one is never returned.
 Figure~\ref{fig:sensor-layout} shows both cases.
@@ -401,8 +401,8 @@ each record are skipped.}
 \subsection{The read-ahead window}
 
 The recording is not loaded whole. Reads pass through a sliding window of
-\texttt{window\_samples} records --- 4096 by default, widened when the caller's
-frame is larger --- which is refilled as the reader advances. In the real pipeline
+\texttt{window\_samples} records  4096 by default, widened when the caller's
+frame is larger  which is refilled as the reader advances. In the real pipeline
 the block loader asks for block-sized frames, so the window becomes 16\,384
 records: 64\,KiB of a planar file or 256\,KiB of an interleaved one, in one call
 to \texttt{fread}. A caller reading one sample at a time therefore sees exactly
@@ -478,15 +478,15 @@ is exactly 6\,s however fast the host runs; in loop mode the counter keeps
 advancing across the wrap, as a sensor that never stops would.
 \texttt{sensor\_read\_paced} adds a wait after each read so the stream holds the
 configured rate. That wait and the monotonic clock behind it are the only
-platform-specific code in the project --- \texttt{clock\_gettime} and
-\texttt{nanosleep} on QNX, with one shim for the host build --- and its resolution
+platform-specific code in the project  \texttt{clock\_gettime} and
+\texttt{nanosleep} on QNX, with one shim for the host build  and its resolution
 is a millisecond, so pacing is meaningful up to roughly 500\,Hz.
 
 \subsection{Rejecting bad input, and the interface}
 
 Nothing is assumed about the file. A missing path, an empty file, a length that is
 not a whole number of \texttt{float32} values or of records, an offset outside the
-record, a stride below one, an unknown layout, a frame or rate out of range ---
+record, a stride below one, an unknown layout, a frame or rate out of range 
 each returns a null handle or an error code and prints a sentence naming the
 problem instead of reading nonsense. Reads follow the same discipline: the number
 of samples delivered, 0 at the end of a recording, $-1$ for an error.
@@ -519,7 +519,206 @@ Function & Purpose \\
 The block loader (\texttt{block\_loader.c}) aggregates these samples into exact 64 KB blocks (\texttt{PROTO\_BLOCK\_SAMPLES} of 16384 float32 values).
 
 \section{Parallel Merge-Sort}
-The server sorts each block using a parallel Merge-Sort algorithm. The sort is partitioned across multiple POSIX worker threads. A mutex and two condition variables (\texttt{work\_ready}, \texttt{phase\_done}) are used to synchronize the phases, ensuring that merge operations only begin after all preceding partition tasks are complete.
+\label{sec:mergesort}
+
+Sorting a block is the service's one genuinely parallel computation, and it is the
+step where a mistake is hardest to see: a wrong sort still returns numbers of the
+right count. The implementation is therefore built around two properties that can
+be checked rather than argued. The output does not depend on how many workers ran,
+and the plan the workers actually executed is reported, so a run can be shown to
+have taken the parallel path rather than the serial one.
+
+\subsection{The pool and the plan}
+
+The threads are created once per process by \texttt{ms\_pool\_create}  one per
+online CPU by default, four on the Raspberry Pi 4, capped at
+\texttt{MS\_MAX\_THREADS} (64)  and they wait on a condition variable when there
+is nothing to do. Nothing is created or destroyed per block.
+
+Each sort splits the one array it was given according to how much work a worker
+needs to be worth waking:
+
+\begin{equation}
+  k = \min\!\left(\left\lfloor \frac{n}{1024} \right\rfloor,\ \texttt{nthreads}\right),
+  \qquad \texttt{part} = \left\lceil \frac{n}{k} \right\rceil
+  \label{eq:merge-plan}
+\end{equation}
+
+so a 16\,384-sample block on four workers becomes four partitions of 4096. Phase
+0 posts one partition task per slice; each worker sorts its slice with the
+ordinary single-threaded merge sort, writing into its own region of one scratch
+buffer. What comes back is four sorted runs, not one sorted block. The merge
+phases then halve the number of runs  merge adjacent pairs, swap which buffer
+is read and which is written, repeat  until a single run covers the array.
+Figure~\ref{fig:merge-plan} shows the shape of a block on four workers: three
+rounds, seven tasks.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[font=\footnotesize\sffamily,
+  run/.style={draw, minimum width=2.5cm, minimum height=0.5cm, inner sep=1pt,
+              align=center},
+  done/.style={run, fill=blue!12},
+  hdr/.style={font=\scriptsize\sffamily, align=center},
+  arr/.style={-{Latex[length=2mm]}}]
+  % phase headers
+  \node[hdr] at (0, 3.1) {phase 0\\\scriptsize 4 partition tasks};
+  \node[hdr] at (4.0, 3.1) {phase 1\\\scriptsize 2 merge tasks};
+  \node[hdr] at (7.9, 3.1) {phase 2\\\scriptsize 1 merge task};
+  % barriers
+  \draw[dashed, gray] (2.0, -2.0) -- (2.0, 2.5);
+  \draw[dashed, gray] (5.95, -2.0) -- (5.95, 2.5);
+  \node[font=\scriptsize\sffamily, rotate=90, gray, xshift=-0.16cm] at (2.0, -1.5) {barrier};
+  \node[font=\scriptsize\sffamily, rotate=90, gray, xshift=-0.16cm] at (5.95, -1.5) {barrier};
+  % phase 0
+  \node[run] (a) at (0, 2.2) {0--4095};
+  \node[run] (b) at (0, 1.4) {4096--8191};
+  \node[run] (c) at (0, 0.6) {8192--12287};
+  \node[run] (d) at (0, -0.2) {12288--16383};
+  % phase 1
+  \node[done] (ab) at (4.0, 1.8) {0--8191};
+  \node[done] (cd) at (4.0, 0.2) {8192--16383};
+  % phase 2
+  \node[done] (abcd) at (7.9, 1.0) {0--16383};
+  % arrows
+  \draw[arr] (a.east) -- (ab.north west);
+  \draw[arr] (b.east) -- (ab.south west);
+  \draw[arr] (c.east) -- (cd.north west);
+  \draw[arr] (d.east) -- (cd.south west);
+  \draw[arr] (ab.east) -- (abcd.north west);
+  \draw[arr] (cd.east) -- (abcd.south west);
+  % buffer notes, below the whole diagram so they cannot overlap a run box
+  \node[font=\scriptsize\sffamily, align=center] at (0, -2.2)
+    {data $\rightarrow$ scratch};
+  \node[font=\scriptsize\sffamily, align=center] at (4.0, -2.2)
+    {scratch $\rightarrow$ data};
+  \node[font=\scriptsize\sffamily, align=center] at (7.9, -2.2)
+    {data $\rightarrow$ scratch};
+\end{tikzpicture}
+\caption{The plan for one 64\,KiB block on four workers. Phase 0 sorts four
+partitions, each into its own slice of the scratch buffer; each later phase
+merges adjacent runs and writes the other buffer, so the answer alternates
+between the caller's array and the scratch. A phase cannot begin until every task
+of the previous one has finished  the dashed barriers.}
+\label{fig:merge-plan}
+\end{figure}
+
+\subsection{The merge, and why the answer is stable}
+
+Two sorted runs become one by looking at the front of each and taking the smaller,
+which is the whole of the merge:
+
+\noindent\begin{minipage}{\linewidth}
+\begin{lstlisting}[caption={The merge step. The comparison is \texttt{<=}, so on
+a tie the value from the left run goes first.}, label={lst:merge-runs},
+basicstyle=\ttfamily\footnotesize]
+static void merge_runs(const float *a, size_t na,
+                       const float *b, size_t nb, float *out)
+{
+    size_t i = 0;
+    size_t j = 0;
+    size_t k = 0;
+
+    while (i < na && j < nb)
+        out[k++] = (a[i] <= b[j]) ? a[i++] : b[j++];
+    while (i < na)
+        out[k++] = a[i++];
+    while (j < nb)
+        out[k++] = b[j++];
+}
+\end{lstlisting}
+\end{minipage}
+
+That one character, \texttt{<=} rather than \texttt{<}, is what makes the sort
+\emph{stable}: equal values keep the order in which they arrived. Stability is
+what makes the result independent of the thread count. A different partition
+count changes \emph{when} two equal values meet, and the tie rule decides the
+same way whichever side they come from, so one worker and eight workers produce
+byte-identical output. The test suite asserts exactly that, for one, two, three,
+five and eight workers.
+
+\subsection{The barrier between phases}
+
+Each phase's tasks go into one shared array and the workers claim them from a
+queue. The phase boundary is a barrier on completion, not a delay:
+
+\noindent\begin{minipage}{\linewidth}
+\begin{lstlisting}[caption={\texttt{post\_phase()}: publish a round's tasks, then
+block until every one of them has been counted as done.}, label={lst:post-phase},
+basicstyle=\ttfamily\footnotesize]
+static void post_phase(mergesort_pool_t *p, unsigned ntasks)
+{
+    pthread_mutex_lock(&p->lock);
+    p->ntasks     = ntasks;
+    p->next_task  = 0;
+    p->tasks_done = 0;
+    pthread_cond_broadcast(&p->work_ready);
+    while (p->tasks_done < p->ntasks)
+        pthread_cond_wait(&p->phase_done, &p->lock);
+    pthread_mutex_unlock(&p->lock);
+}
+\end{lstlisting}
+\end{minipage}
+
+The worker side is the other half of the same protocol: take the lock, wait on
+\texttt{work\_ready} until a task index is available, copy that index out, and
+release the lock \emph{before} running the task  the sort itself never runs
+under the lock. When it finishes it takes the lock again, increments the count and
+the task counter, and the worker that reaches \texttt{ntasks} signals
+\texttt{phase\_done}. The caller wakes, and only then posts the merges that read
+what those tasks wrote. There is no sleep anywhere, so a slow machine simply takes
+longer; it cannot produce a different order. The buffers and the task array are
+changed only between phases, which is after every task has been counted, so a
+worker never reads a task that is being rewritten.
+
+\subsection{Refusals, and the plan line}
+
+Two decisions keep the parallel path honest. Inputs below
+\texttt{MS\_PARALLEL\_MIN} (4096 values) are sorted single-threaded, because
+waking a pool costs more than the sort saves at that size, and
+\texttt{ms\_sort} refuses a second concurrent call on the same pool with $-1$
+rather than corrupting the shared round state  one pool sorts one array at a
+time.
+
+The plan is recorded as it happened, not as it was intended: the statistics count
+partitions, merge phases and tasks actually executed. That record is what makes
+the parallelism checkable. ``1 partition, 0 merge phases, 1 task'' cannot come out
+of a four-worker run, so the plan line is proof that the parallel path was taken,
+whereas the elapsed time alone would not distinguish a fast serial sort from a
+parallel one.
+
+\subsection{Measured scaling}
+
+On the Raspberry Pi 4, sorting one 64\,KiB block (voltage, thread sweep, three
+repeats per point):
+
+\begin{table}[htbp]
+\centering
+\caption{The sort alone, per 64\,KiB block, against the number of workers. The
+plan column is what the run reported.}
+\label{tab:merge-scaling}
+\begin{tabular}{@{}llll@{}}
+\hline
+Workers & Plan & Time per block & Speed-up \\
+\hline
+1 & 1 partition, 0 phases, 1 task & 2.40\,ms & 1.00$\times$ \\
+2 & 2 partitions, 1 phase, 3 tasks & 1.32\,ms & 1.82$\times$ \\
+3 & 3 partitions, 2 phases, 5 tasks & 1.09\,ms & 2.20$\times$ \\
+4 & 4 partitions, 2 phases, 7 tasks & 0.80\,ms & 3.00$\times$ \\
+\hline
+\end{tabular}
+\end{table}
+
+The separate \texttt{test\_kpi} benchmark measures the same curve with a best-of-20
+policy on its own block: 3.010, 1.631 and 1.011\,ms at one, two and four workers,
+a speed-up of 2.98$\times$, so the two measurements agree. Four workers reach
+three times the throughput of one rather than four: the partitions are created and
+the merges are contended for, and the filter that follows is serial.
+
+The headroom is worth stating in the same breath. One block is 163.84\,s of signal
+at the 100\,Hz design rate, and it sorts in 0.80\,ms  roughly two hundred
+thousand times faster than the data arrives. Even at the recording's own,
+unevenly sampled rate of about 13.36\,Hz, a block spans 1226\,s of stream.
 
 \section{Rolling Median Filter (Hampel Filter)}
 To remove outliers, the server applies a Hampel-style rolling median filter. The filter calculates the median and Median Absolute Deviation (MAD) of a sliding window. If a sample deviates from the median by more than a configurable threshold (4.0 sigma), it is replaced. This preserves legitimate signal edges while removing sudden spikes.
@@ -533,6 +732,181 @@ Upon completion, the server sends a pulse. Because a pulse value is limited to 3
 
 \subsection{Shared Memory}
 To avoid sending the large processed arrays back over IPC, the server maps a named shared memory region (\texttt{/dev/shmem/sortmed-results}). The server writes the sorted and filtered arrays directly into this region, and the client maps it read-only to retrieve the results.
+
+\section{Testing}
+\label{sec:testing}
+
+Every stage of this service has a plausible-looking failure mode. A sort that
+loses one value, a filter that replaces a legitimate edge, a checksum computed
+over the wrong bytes, a shared region read at the wrong offset: each still
+produces numbers of the right shape, and inspection of the output alone would not
+settle any of them. The tests are therefore built to compare against an answer
+computed some other way, and to make the system prove that it refuses what it
+should refuse.
+
+\subsection{Two folds, one set of sources}
+
+The tests run twice, on two very different machines, from exactly the same source
+files.
+
+The \emph{host} fold is a set of plain C programs built with \texttt{gcc}. It is
+fast, it can be instrumented, and it can do the two things the target cannot do
+comfortably: compare against the C library's \texttt{qsort}, and feed malformed
+input on purpose.
+
+The \emph{board} fold cross-compiles the same sources with
+\texttt{qcc -Vgcc\_ntoaarch64le} and runs them from the boot image on the
+Raspberry Pi 4, where the compiler, the C library and the CPU are all different.
+The board returns the same counts for the same suites, which is the point: with
+the code held constant, the only thing left that could differ is the kernel, and
+that is what the message passing, the pulse and the shared results region
+exercise. The board run is therefore a confirmation of the host run rather than a
+separate experiment --- a disagreement would point at the environment, and
+agreement means the behaviour is not an accident of one toolchain.
+
+\subsection{Four kinds of evidence}
+
+\begin{table}[htbp]
+\centering
+\caption{The kinds of evidence the suites use, and why each is convincing.}
+\label{tab:test-evidence}
+\begin{tabular}{@{}lp{4.9cm}p{5.6cm}@{}}
+\hline
+Kind & Example & Why it is convincing \\
+\hline
+Two independent routes & planar file versus interleaved record; one sample at a time versus whole blocks & different code paths, so a stride, offset or window-refill mistake makes them disagree \\
+An oracle & \texttt{qsort} on the same values & not our code and not our bug \\
+Invariants & output ordered; the multiset unchanged; seals match; byte-identical output for 1, 2, 3, 5 and 8 workers & catches a class of bug rather than one example: a lost value, a duplicated value, a half-merged phase \\
+Deliberate bad input & a 3-byte file, a 6-float record, a NULL path, one nudged sample, a fetch for an unknown job & proves the system refuses instead of quietly doing something wrong \\
+\hline
+\end{tabular}
+\end{table}
+
+\subsection{The suites and what they establish}
+
+\begin{table}[htbp]
+\centering
+\caption{The six suites. The checks are per suite; the total is the figure quoted
+for both folds. The KPI suite is a benchmark and is counted separately.}
+\label{tab:test-suites}
+\begin{tabular}{@{}lrp{7.4cm}@{}}
+\hline
+Suite & Checks & What it establishes \\
+\hline
+\texttt{test\_protocol} & 186 & the wire contract: 64\,KiB blocks, safe message numbers, seal sensitivity, shared-region arithmetic \\
+\texttt{test\_sensor} & 642 & a file behaves like a device: both layouts agree bit for bit, frames capped, clock exact, junk refused \\
+\texttt{test\_block\_loader} & 116 & a stream becomes blocks that survive the trip: split right, padded right, sealed over the right bytes \\
+\texttt{test\_mergesort} & 578 & sorted, the same multiset, byte-identical for 1, 2, 3, 5 and 8 workers, plan line as expected \\
+\texttt{test\_median} & 7\,615 & the Hampel filter against a reference, across block seams, bursts, dropouts and bad arguments \\
+\texttt{test\_shared\_memory} & 13 & the results region's bounds and arithmetic \\
+\hline
+\textbf{Total} & \textbf{9\,150} & 0 failed, 0 skipped, on host and on board \\
+\texttt{test\_kpi} & 79 & benchmark: sort at 1 / 2 / 4 workers, global median computed two ways \\
+\hline
+\end{tabular}
+\end{table}
+
+\subsection{The board run}
+
+The output below is taken from the board's console after
+\texttt{test\_outputs.txt} was captured. Each suite prints a line per test and a
+summary; the summaries are quoted here, with the intermediate lines elided.
+
+\noindent\begin{minipage}{\linewidth}
+\begin{lstlisting}[language={}, caption={The six suite summaries, the client
+deadline test and the soak, as printed on the board.}, label={lst:board-summary},
+basicstyle=\ttfamily\footnotesize]
+Shared-memory bounds tests: 13 checks, 0 failures
+
+  186 checks, 0 failed, 0 skipped        (protocol)
+  7615 checks, 0 failed, 0 skipped       (median)
+  578 checks, 0 failed, 0 skipped        (mergesort)
+  642 checks, 0 failed, 0 skipped        (sensor)
+  116 checks, 0 failed, 0 skipped        (block loader)
+  79 checks, 0 failures                  (kpi benchmark)
+
+client-wait-test: both cases pass
+soak: 20 runs, all completed, all with identical medians
+\end{lstlisting}
+\end{minipage}
+
+The screenshots that follow are the console as it was captured, one per suite.
+They are the evidence rather than the summary: the test names scroll past with
+their verdicts, and the suites that reject bad input print the refusals they
+provoked --- every one of those lines is followed by \texttt{ok}.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\linewidth]{photos/test_protocol.png}
+\caption{The protocol suite on the board: the wire contract, the shared-region
+layout and the seal's sensitivity, 186 checks.}
+\label{fig:test-protocol}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\linewidth]{photos/test_sensor.png}
+\caption{The sensor suite on the board. The \texttt{sensor:} lines are the test
+failing on purpose --- a missing file, a 3-byte file, a 6-float record --- each
+followed by \texttt{ok}.}
+\label{fig:test-sensor}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\linewidth]{photos/test_block_loader.png}
+\caption{The block loader suite on the board: the interleaved recording produces
+the same blocks and the same seals as the host.}
+\label{fig:test-loader}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\linewidth]{photos/test_mergesort.png}
+\caption{The merge sort suite on the board: ordering, the multiset, the plan line
+and byte-identical output across thread counts.}
+\label{fig:test-mergesort}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\linewidth]{photos/test_median.png}
+\caption{The median suite on the board, the largest at 7\,615 checks: the filter
+against a reference, across seams, bursts and dropouts.}
+\label{fig:test-median}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\linewidth]{photos/test_sharedmemory.png}
+\caption{The shared-memory suite: the results region's bounds and arithmetic,
+13 checks.}
+\label{fig:test-shm}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\linewidth]{photos/test_kpi.png}
+\caption{The KPI benchmark on the board: sort throughput at one, two and four
+workers, and the global median computed two ways agreeing bit for bit.}
+\label{fig:test-kpi}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\linewidth]{photos/test_client_wait.png}
+\caption{The client deadline test: with no server the client gives up at ten
+seconds, and with a server that starts three seconds late it connects by itself.}
+\label{fig:test-wait}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\linewidth]{photos/test_soak.png}
+\caption{The soak: twenty consecutive runs, every one completing with identical
+medians and a stable service time per block.}
+\label{fig:test-soak}
+\end{figure}
 
 % ============================================================
 % CHAPTER 4

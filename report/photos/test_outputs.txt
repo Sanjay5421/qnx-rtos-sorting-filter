@@ -1,0 +1,223 @@
+
+ Serial  Port opened
+Hypervisor support disabled
+MMU: 16-bit ASID 44-bit PA TCR_EL1=00000014b5183519
+GICv2: 256 interrupts
+GICv2: routing SPIs to gic cpu 0
+cpu0: MPIDR=0000000080000000
+cpu0: MIDR=410fd083 Cortex-A72 r0p3
+cpu0: DCZID_EL0=0x00000004 (64 bytes)
+cpu0: CWG=4 ERG=4 Dminline=4 Iminline=4 PIPT
+cpu0: CLIDR=a200023 LoUU=1 LoC=2 LoUIS=1
+cpu0: L1 Icache 48K linesz=64 set/way=256/3
+cpu0: L1 Dcache 32K linesz=64 set/way=256/2
+cpu0: L2 Unified 1024K linesz=64 set/way=1024/16
+cpu0: GICv2 cpu interface 0
+Loading IFS...done
+cpu1: MPIDR=0000000080000001
+cpu1: MIDR=410fd083 Cortex-A72 r0p3
+cpu1: DCZID_EL0=0x00000004 (64 bytes)
+cpu1: CWG=4 ERG=4 Dminline=4 Iminline=4 PIPT
+cpu1: CLIDR=a200023 LoUU=1 LoC=2 LoUIS=1
+cpu1: L1 Icache 48K linesz=64 set/way=256/3
+cpu1: L1 Dcache 32K linesz=64 set/way=256/2
+cpu1: L2 Unified 1024K linesz=64 set/way=1024/16
+# cd /tmp
+# test_shared_memory 
+Shared-memory bounds tests: 13 checks, 0 failures
+# test_protocol 
+protocol tests (the common message definition)
+
+  test_block_is_64kib                  ok
+  test_message_types                   ok
+  test_pulse_code                      ok
+  test_field_layout                    ok
+  test_shm_name                        ok
+  test_shm_layout                      ok
+  test_result_describes_the_region     ok
+  test_run_area                        ok
+  test_pulse_payload                   ok
+  test_checksum                        ok
+  test_submit_prepare_is_deterministic ok
+  test_submit_validation               ok
+  test_partial_block_checksum          ok
+  test_names                           ok
+
+  186 checks, 0 failed, 0 skipped
+# test_median
+test_median
+  test_config                          ok
+  test_width_valid_and_parse           ok
+median: width must be odd in 3..31 and the threshold positive
+median: NULL block or output
+median: NULL block or output
+median: context length given without a pointer
+median: context length given without a pointer
+median: output must not overlap the input block
+  test_rejects_bad_arguments           ok
+  test_empty_and_tiny                  ok
+  test_clean_signal_untouched          ok
+  test_single_spike_removed            ok
+  test_burst_and_dropout               ok
+  test_matches_reference               ok
+  test_blocks_equal_whole_signal       ok
+  test_chunk_edges_without_context     ok
+  test_spike_on_block_seam             ok
+  test_spikes_removed_in_noise         ok
+  test_median_of_sorted                ok
+  test_global_median_is_of_raw_data    ok
+
+  7615 checks, 0 failed, 0 skipped
+# test_mergesort /data
+parallel merge sort tests (threshold, partitions, phases)
+  dataset: /data
+
+  test_pool_lifecycle                  ok
+  test_argument_checks                 ok
+  test_small_inputs                    ok
+  test_parallel_sizes                  ok
+  test_sizes_just_above_the_threshold  ok
+  test_thread_count_invariance         ok
+  test_duplicate_values                ok
+  test_presorted_and_reversed          ok
+  test_float_extremes                  ok
+  test_repeated_sorts                  ok
+  test_stats_describe_the_plan         ok
+  test_payload_has_no_nan              ok
+  test_payload_blocks_sort             ok
+
+  578 checks, 0 failed, 0 skipped
+# test_sensor /data
+virtual sensor tests
+  dataset: /data
+
+  test_config_defaults                 ok
+sensor: open called with a NULL path
+sensor_no_such_file.bin: No such file or directory
+sensor: sensor_tmp_planar.bin: unknown layout 99
+sensor: sensor_tmp_planar.bin: stride must be at least 1 (got 0)
+sensor: sensor_tmp_planar.bin: offset must be in [0, 1) (got 5)
+sensor: sensor_tmp_planar.bin: offset must be in [0, 1) (got 1)
+sensor: sensor_tmp_tiny.bin: 3 bytes is not a whole number of float32 values
+sensor: sensor_tmp_empty.bin: file is empty
+sensor: sensor_tmp_partial.bin: 6 values is not a whole number of 4-value records
+  test_open_rejects_bad_input          ok
+  test_exact_bits_round_trip           ok
+  test_strided_layout                  ok
+  test_frame_cap                       ok
+  test_loop_wraps                      ok
+  test_reset_restarts                  ok
+  test_window_boundaries               ok
+  test_timestamps                      ok
+  test_block_read                      ok
+  test_paced_reads                     ok
+  test_real_layouts_agree              ok
+  test_real_block_partition            ok
+  test_real_min_max                    ok
+  test_real_channel_offsets            ok
+
+  642 checks, 0 failed, 0 skipped
+
+
+# test_block_loader /data
+block loader tests (recording -> 64 KiB blocks)
+  dataset: /data
+
+  test_channel_offsets                 ok
+block_loader: open called with a NULL path
+loader_no_such_file.bin: No such file or directory
+block_loader: loader_tmp_ramp.bin: unknown layout 99
+block_loader: loader_tmp_ramp.bin: rate_hz must be at least 1
+block_loader: loader_tmp_ramp.bin: unknown channel 4
+  test_open_rejects_bad_input          ok
+  test_synthetic_partition             ok
+  test_synthetic_matches_source        ok
+  test_real_partition                  ok
+  test_real_layouts_agree              ok
+  test_submit_round_trip               ok
+  test_corruption_detected             ok
+
+  116 checks, 0 failed, 0 skipped
+
+
+# test_kpi
+KPI: one 64 KiB block = 16384 samples = 65536 B; recording = 65536 samples
+
+parallel merge sort, best of 20 runs:
+  stage      wrk    per block    throughput     sample rate
+  sort         1     3.010 ms      20.8 MiB/s       5.4 Msamples/s
+  sort         2     1.631 ms      38.3 MiB/s      10.0 Msamples/s
+  sort         4     1.011 ms      61.8 MiB/s      16.2 Msamples/s
+  1 -> 4 workers: 2.98x
+  serial       1     3.008 ms      20.8 MiB/s       5.4 Msamples/s
+
+rolling median filter (width 9, threshold 4.0 sigma):
+  clean block:    3.809 ms, 0 replacements
+  spiked block:   3.838 ms, 8 replacements for 8 injected spikes
+
+global merge over the recording's four sorted blocks:
+  1.408 ms for 65536 samples (177.6 MiB/s)
+  global median, merged -0.392578125 == re-sorted -0.392578125 (bit for bit)
+
+79 checks, 0 failures
+# 
+# sh /bin/client-wait-test.sh
+case 1: no server -- the client must give up after about ten seconds
+  ok: exit 1, and the deadline the client reported was reached
+case 2: server three seconds late -- the client must connect by itself
+  ok: the client waited for the server, then completed the run
+client-wait-test: both cases pass
+# 
+# 
+# 
+
+  [6] w9_t1_current_r3
+  [7] w9_t1_temperature_r1
+# sh /bin/soak.sh 20
+run 1: ok
+        timing: run_ns=34989815 blocks=4 submit_avg_ns=194768 service_avg_ns=7219403 fetch_avg_ns=90087 block_avg_ns=7504259 server_avg_ns=6775740
+run 2: ok, same medians
+        timing: run_ns=34992444 blocks=4 submit_avg_ns=196037 service_avg_ns=7205791 fetch_avg_ns=98458 block_avg_ns=7500287 server_avg_ns=6764287
+run 3: ok, same medians
+        timing: run_ns=35053685 blocks=4 submit_avg_ns=195458 service_avg_ns=7221370 fetch_avg_ns=107226 block_avg_ns=7524055 server_avg_ns=6766690
+run 4: ok, same medians
+        timing: run_ns=34944778 blocks=4 submit_avg_ns=194194 service_avg_ns=7199680 fetch_avg_ns=100843 block_avg_ns=7494717 server_avg_ns=6757106
+run 5: ok, same medians
+        timing: run_ns=35010778 blocks=4 submit_avg_ns=201212 service_avg_ns=7213602 fetch_avg_ns=96375 block_avg_ns=7511189 server_avg_ns=6770699
+run 6: ok, same medians
+        timing: run_ns=35073944 blocks=4 submit_avg_ns=196120 service_avg_ns=7213953 fetch_avg_ns=107361 block_avg_ns=7517435 server_avg_ns=6762264
+run 7: ok, same medians
+        timing: run_ns=35057537 blocks=4 submit_avg_ns=196389 service_avg_ns=7218277 fetch_avg_ns=100703 block_avg_ns=7515370 server_avg_ns=6770124
+run 8: ok, same medians
+        timing: run_ns=35007963 blocks=4 submit_avg_ns=196528 service_avg_ns=7212148 fetch_avg_ns=100671 block_avg_ns=7509347 server_avg_ns=6764759
+run 9: ok, same medians
+        timing: run_ns=35073445 blocks=4 submit_avg_ns=195213 service_avg_ns=7220967 fetch_avg_ns=108671 block_avg_ns=7524852 server_avg_ns=6774583
+run 10: ok, same medians
+        timing: run_ns=34979852 blocks=4 submit_avg_ns=195046 service_avg_ns=7197342 fetch_avg_ns=102991 block_avg_ns=7495379 server_avg_ns=6759666
+run 11: ok, same medians
+        timing: run_ns=35028926 blocks=4 submit_avg_ns=196065 service_avg_ns=7213240 fetch_avg_ns=103240 block_avg_ns=7512546 server_avg_ns=6771550
+run 12: ok, same medians
+        timing: run_ns=35021722 blocks=4 submit_avg_ns=196482 service_avg_ns=7205671 fetch_avg_ns=106680 block_avg_ns=7508833 server_avg_ns=6767060
+run 13: ok, same medians
+        timing: run_ns=35042315 blocks=4 submit_avg_ns=195731 service_avg_ns=7217972 fetch_avg_ns=100902 block_avg_ns=7514606 server_avg_ns=6771402
+run 14: ok, same medians
+        timing: run_ns=35079796 blocks=4 submit_avg_ns=196333 service_avg_ns=7225514 fetch_avg_ns=99606 block_avg_ns=7521453 server_avg_ns=6780528
+run 15: ok, same medians
+        timing: run_ns=35075648 blocks=4 submit_avg_ns=197722 service_avg_ns=7220532 fetch_avg_ns=107185 block_avg_ns=7525440 server_avg_ns=6767208
+run 16: ok, same medians
+        timing: run_ns=34999315 blocks=4 submit_avg_ns=195305 service_avg_ns=7214435 fetch_avg_ns=97560 block_avg_ns=7507300 server_avg_ns=6772879
+run 17: ok, same medians
+        timing: run_ns=35005518 blocks=4 submit_avg_ns=196083 service_avg_ns=7207347 fetch_avg_ns=98407 block_avg_ns=7501838 server_avg_ns=6763843
+run 18: ok, same medians
+        timing: run_ns=35119981 blocks=4 submit_avg_ns=197476 service_avg_ns=7226606 fetch_avg_ns=108287 block_avg_ns=7532370 server_avg_ns=6776671
+run 19: ok, same medians
+        timing: run_ns=35006463 blocks=4 submit_avg_ns=196421 service_avg_ns=7204180 fetch_avg_ns=102018 block_avg_ns=7502620 server_avg_ns=6767194
+run 20: ok, same medians
+        timing: run_ns=34952944 blocks=4 submit_avg_ns=195495 service_avg_ns=7207148 fetch_avg_ns=95319 block_avg_ns=7497962 server_avg_ns=6762004
+soak: 20 runs, all completed, all with identical medians
+# 
+
+
+
+
+
