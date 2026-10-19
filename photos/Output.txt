@@ -1,0 +1,84 @@
+# cd /tmp
+# sortmed-server &
+[1] 737300
+sortmed-server: service 'sortmed' ready; shm=/sortmed-results (764416 bytes)
+sortmed-server: 4 merge workers; filter width per job, default 9, threshold 4.0 sigma
+# mkdir -p /var/mnt
+# ls /dev/sd*
+/dev/sd0  /dev/sd0t12
+# mount -t dos /dev/sd0t12 /var/mnt
+# for ch in voltage current temperature time; do
+>     mkdir -p /var/mnt/$ch
+>     cd /var/mnt/$ch
+>     sortmed-client -w 15 /data/bin/Chen2020_c1_T25_discharge.bin interleaved $ch 100
+>     cd /
+> done
+perf: run=1 job=1 channel=voltage width=15 samples=16384 seq=0 copy=20000 sort=922000 filter=12664574 sum=349981 merge=67296 publish=0 total=14025667
+pulse: job=1 code=17 median=3.961808
+job=1 samples=16384 block_median=3.961808 outliers=353 elapsed=13957926 ns
+perf: run=1 job=2 channel=voltage width=15 samples=16384 seq=1 copy=9593 sort=751963 filter=12682074 sum=359575 merge=168426 publish=0 total=13973407
+pulse: job=2 code=18 median=3.641635
+job=2 samples=16384 block_median=3.641635 outliers=290 elapsed=13804408 ns
+perf: run=1 job=3 channel=voltage width=15 samples=16384 seq=2 copy=9704 sort=753741 filter=12730204 sum=350111 merge=262796 publish=0 total=14108389
+pulse: job=3 code=19 median=3.384104
+job=3 samples=16384 block_median=3.384104 outliers=331 elapsed=13845314 ns
+perf: run=1 job=4 channel=voltage width=15 samples=10848 seq=3 copy=5834 sort=679407 filter=8355926 sum=232000 merge=318333 publish=739612 total=10333370
+pulse: job=4 code=20 median=3.566194  (global)
+job=4 samples=10848 block_median=2.973536 outliers=214 elapsed=9274575 ns
+recording complete: samples=60000 global_median=3.56619358 rolling_filter_width=15 global_outliers=1188
+cross-check: server pulse/descriptor median 3.56619358 == client 3.56619358
+output written: raw.bin (240000 bytes), sorted.bin (240000 bytes), filtered.bin (240000 bytes), medians.csv (4 blocks)
+timing: run_ns=58858815 blocks=4 submit_avg_ns=194097 service_avg_ns=13171815 fetch_avg_ns=84088 block_avg_ns=13450000 server_avg_ns=12720555
+timing: post_sort_ns=5612074 post_filter_ns=46446389 write_ns=12796907
+perf: run=2 job=1 channel=current width=15 samples=16384 seq=0 copy=20315 sort=1032870 filter=12607185 sum=349982 merge=68870 publish=0 total=14081222
+pulse: job=1 code=17 median=4.996817
+job=1 samples=16384 block_median=4.996817 outliers=357 elapsed=14011667 ns
+perf: run=2 job=2 channel=current width=15 samples=16384 seq=1 copy=9629 sort=1069648 filter=12580166 sum=349833 merge=413444 publish=0 total=14424704
+pulse: job=2 code=18 median=5.00002
+job=2 samples=16384 block_median=5.00002 outliers=306 elapsed=14010648 ns
+perf: run=2 job=3 channel=current width=15 samples=16384 seq=2 copy=9611 sort=1052834 filter=12612556 sum=354297 merge=613907 publish=0 total=14645056
+pulse: job=3 code=19 median=5.000128
+job=3 samples=16384 block_median=5.000128 outliers=282 elapsed=14030389 ns
+perf: run=2 job=4 channel=current width=15 samples=10848 seq=3 copy=5871 sort=736852 filter=8354315 sum=232167 merge=492926 publish=739500 total=10563019
+pulse: job=4 code=20 median=4.997584  (global)
+job=4 samples=10848 block_median=0.003621398 outliers=193 elapsed=9330111 ns
+recording complete: samples=60000 global_median=4.99758434 rolling_filter_width=15 global_outliers=1139
+cross-check: server pulse/descriptor median 4.99758434 == client 4.99758434
+output written: raw.bin (240000 bytes), sorted.bin (240000 bytes), filtered.bin (240000 bytes), medians.csv (4 blocks)
+timing: run_ns=60090166 blocks=4 submit_avg_ns=195652 service_avg_ns=13488236 fetch_avg_ns=80324 block_avg_ns=13764212 server_avg_ns=12845703
+timing: post_sort_ns=6269630 post_filter_ns=46141315 write_ns=11871334
+perf: run=3 job=1 channel=temperature width=15 samples=16384 seq=0 copy=20352 sort=849463 filter=12536611 sum=354518 merge=72241 publish=0 total=13834907
+pulse: job=1 code=17 median=301.3247
+job=1 samples=16384 block_median=301.3247 outliers=321 elapsed=13762037 ns
+perf: run=3 job=2 channel=temperature width=15 samples=16384 seq=1 copy=9741 sort=874981 filter=12583259 sum=350056 merge=209574 publish=0 total=14029741
+pulse: job=2 code=18 median=304.8079
+job=2 samples=16384 block_median=304.8079 outliers=298 elapsed=13819630 ns
+perf: run=3 job=3 channel=temperature width=15 samples=16384 seq=2 copy=10167 sort=876018 filter=12593982 sum=349982 merge=320000 publish=0 total=14152019
+pulse: job=3 code=19 median=305.5219
+job=3 samples=16384 block_median=305.5219 outliers=304 elapsed=13831463 ns
+perf: run=3 job=4 channel=temperature width=15 samples=10848 seq=3 copy=7593 sort=615444 filter=8392777 sum=231778 merge=484111 publish=747888 total=10481222
+pulse: job=4 code=20 median=304.8353  (global)
+job=4 samples=10848 block_median=305.1171 outliers=254 elapsed=9248630 ns
+recording complete: samples=60000 global_median=304.835266 rolling_filter_width=15 global_outliers=1177
+cross-check: server pulse/descriptor median 304.835266 == client 304.835266
+output written: raw.bin (240000 bytes), sorted.bin (240000 bytes), filtered.bin (240000 bytes), medians.csv (4 blocks)
+timing: run_ns=58899685 blocks=4 submit_avg_ns=196393 service_avg_ns=13186190 fetch_avg_ns=81546 block_avg_ns=13464129 server_avg_ns=12665440
+timing: post_sort_ns=5841019 post_filter_ns=45975444 write_ns=15151130
+perf: run=4 job=1 channel=time width=15 samples=16384 seq=0 copy=20519 sort=456685 filter=5381870 sum=349982 merge=66352 publish=0 total=6277389
+pulse: job=1 code=17 median=612.9747
+job=1 samples=16384 block_median=612.9747 outliers=0 elapsed=6210408 ns
+perf: run=4 job=2 channel=time width=15 samples=16384 seq=1 copy=9981 sort=436889 filter=5397482 sum=354297 merge=161092 publish=0 total=6361537
+pulse: job=2 code=18 median=1838.999
+job=2 samples=16384 block_median=1838.999 outliers=0 elapsed=6200038 ns
+perf: run=4 job=3 channel=time width=15 samples=16384 seq=2 copy=9889 sort=438889 filter=5559000 sum=350111 merge=270500 publish=0 total=6630185
+pulse: job=3 code=19 median=3065.023
+job=3 samples=16384 block_median=3065.023 outliers=0 elapsed=6359241 ns
+perf: run=4 job=4 channel=time width=15 samples=10848 seq=3 copy=6926 sort=359741 filter=3704222 sum=235944 merge=325315 publish=738686 total=5372389
+pulse: job=4 code=20 median=2244.88  (global)
+job=4 samples=10848 block_median=4083.916 outliers=0 elapsed=4307981 ns
+recording complete: samples=60000 global_median=2244.87988 rolling_filter_width=15 global_outliers=0
+cross-check: server pulse/descriptor median 2244.87988 == client 2244.87988
+output written: raw.bin (240000 bytes), sorted.bin (240000 bytes), filtered.bin (240000 bytes), medians.csv (4 blocks)
+timing: run_ns=31136907 blocks=4 submit_avg_ns=199101 service_avg_ns=6223264 fetch_avg_ns=78412 block_avg_ns=6500777 server_avg_ns=5769417
+timing: post_sort_ns=5541352 post_filter_ns=19980852 write_ns=12886852
+# 
