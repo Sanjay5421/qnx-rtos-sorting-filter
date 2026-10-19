@@ -68,6 +68,7 @@ matplotlib.use("Agg")
 
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
+from matplotlib.colors import BoundaryNorm  # noqa: E402
 
 DPI = 200
 
@@ -329,6 +330,11 @@ def main(argv: list[str]) -> int:
                     help="colormap for the burst heat map: any name matplotlib "
                          "knows, e.g. magma, inferno, plasma, cividis, turbo "
                          "(default: magma)")
+    ap.add_argument("--burst-scale", default="bands", choices=("bands", "continuous"),
+                    help="colour scale for the burst heat map: fixed bands at "
+                         "0/10/50/75/90/99 %%, which suit recall values that "
+                         "pile up at the ends of the range, or a continuous "
+                         "0-100 %% ramp (default: bands)")
     args = ap.parse_args(argv[1:])
 
     root = Path(args.sweep_dir).expanduser()
@@ -654,16 +660,32 @@ def main(argv: list[str]) -> int:
                           and r["recall_by_burst"].get(length) is not None]
                 if values:
                     grid[i, j] = 100.0 * float(np.mean(values))
+        # Recall piles up at the ends of the scale -- near 0 where the window
+        # is too narrow to see the burst at all, near 100 where it covers it --
+        # so a continuous ramp spends most of its range on values the data
+        # never takes. Fixed bands turn the failure frontier into a step that
+        # can be read off the axis, and give partial coverage, such as the
+        # 87 % plateau of two-sample bursts, a colour of its own.
+        bands = (0.0, 10.0, 50.0, 75.0, 90.0, 99.0, 100.01)
         fig, ax = plt.subplots(figsize=(13, 8), dpi=DPI)
-        mesh = ax.pcolormesh(grid, cmap=args.burst_cmap, vmin=0.0, vmax=100.0,
-                             edgecolors="white", linewidth=2.0)
+        if args.burst_scale == "bands":
+            band_cmap = plt.get_cmap(args.burst_cmap).resampled(len(bands) - 1)
+            mesh = ax.pcolormesh(
+                grid, cmap=band_cmap,
+                norm=BoundaryNorm(bands, band_cmap.N, clip=True),
+                edgecolors="white", linewidth=2.0)
+            ticks = bands[:-1] + (100.0,)
+        else:
+            mesh = ax.pcolormesh(grid, cmap=args.burst_cmap, vmin=0.0,
+                                 vmax=100.0, edgecolors="white", linewidth=2.0)
+            ticks = None
         ax.set_xticks(np.arange(len(widths)) + 0.5, [str(w) for w in widths])
         ax.set_yticks(np.arange(len(lengths)) + 0.5,
                       [str(l) if l < 7 else "7+" for l in lengths])
         ax.grid(False)
         style(ax, "Injected burst length (samples)", "Filter width (samples)")
         ax.set_title("Recall against filter width and burst length")
-        bar = fig.colorbar(mesh, ax=ax, pad=0.02)
+        bar = fig.colorbar(mesh, ax=ax, pad=0.02, ticks=ticks)
         bar.set_label("Injected samples replaced (%)")
         fig.tight_layout()
         fig.savefig(out_dir / "width_bursts.png", dpi=DPI)

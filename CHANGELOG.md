@@ -44,14 +44,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
-- **The burst heat map in `tools/filter_sweep.py`.** It takes `--burst-cmap
-  NAME` and now defaults to `magma`, picked by rendering the real grid in
-  magma, inferno and plasma. The recall values run from 0-5 % to 75-100 % with
-  little between, so plasma flattens the whole passing region into one yellow,
-  while magma keeps both the failure frontier and the 87 % plateau of
-  two-sample bursts legible. The grid itself is exported as `width_bursts.csv`,
-  so the figure can be redrawn in any palette, or with banded colour limits,
-  without re-deriving the numbers from the cases.
+- **The burst heat map in `tools/filter_sweep.py`.** It draws fixed colour
+  bands at 0/10/50/75/90/99 % in the magma colormap, and both can be changed:
+  `--burst-scale continuous` restores a 0-100 % ramp, `--burst-cmap NAME` takes
+  any matplotlib palette. Recall piles up at the ends of the range -- near 0
+  where the window is too narrow to see the burst at all, near 100 where it
+  covers it -- so a continuous ramp spends most of its range on values the data
+  never takes, and of the palettes tried on the grid plasma flattened the whole
+  passing region into one yellow. Bands turn the failure frontier into a step
+  that can be read off the axis, and give partial coverage, such as the 87 %
+  plateau of two-sample bursts, a colour of its own. The grid itself is
+  exported as `width_bursts.csv`, so the figure can be redrawn without
+  re-deriving the numbers from the cases.
 - `median_width_valid()` and `median_width_parse()` are now the one home of the
   width rule, shared by the filter, the message validation and the command line.
 - The build installs the board scripts beside the programs and
