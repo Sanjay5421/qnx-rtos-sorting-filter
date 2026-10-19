@@ -6,10 +6,14 @@ session. The precise version of everything here is in
 [IMPLEMENTATION.md](IMPLEMENTATION.md), and the commands are in
 [REPRODUCE.md](REPRODUCE.md).
 
-**Where we are today:** all four milestones are built and verified on the Raspberry
-Pi 4 — image `ifs-rpi4.bin`, SHA-256 `57637557…4588c49`. M3 and M4 ran end to end
-on 2026-10-17, once per channel for all four columns, and every channel reproduced
-the host's numbers exactly: the sorted arrays, the filtered arrays and the medians.
+**Where we are today:** the project is complete. All four milestones are built and
+verified on the Raspberry Pi 4 — image `ifs-rpi4.bin`, SHA-256
+`2ac01f08…31fc9d8b` — and the service ran end to end on all four channels twice:
+once at the default width 9 (the 2026-10-17 run) and once at **width 15**, the
+width the sweeps showed to be optimal. Every channel reproduced the host's numbers
+exactly: the sorted arrays, the filtered arrays and the medians. The measurement
+campaign is done too — width sweep, thread sweep, a 20-run soak and the client
+deadline test — and its figures are published in `run-figures/`.
 [FINAL-RUN.md](FINAL-RUN.md) is the run sheet; this file is what to say about it.
 
 ---
@@ -384,14 +388,20 @@ check that 1, 2, 3, 5 and 8 workers produce byte-identical output.
 
 ### The plan line, and what the timings say
 
-| Workers | Plan the program reports | Per 64 KiB block |
-| --- | --- | --- |
-| 1 | 1 partition, 0 merge phases, 1 task | 2.278 ms |
-| 2 | 2 partitions, 1 merge phase, 3 tasks | 1.253 ms |
-| 4 | 4 partitions, 2 merge phases, 7 tasks | 0.757 ms |
+| Workers | Plan the program reports | Per 64 KiB block | Scale |
+| --- | --- | --- | --- |
+| 1 | 1 partition, 0 merge phases, 1 task | 2.40 ms | 1.00× |
+| 2 | 2 partitions, 1 merge phase, 3 tasks | 1.32 ms | 1.82× |
+| 3 | 3 partitions, 2 merge phases, 5 tasks | 1.09 ms | 2.20× |
+| 4 | 4 partitions, 2 merge phases, 7 tasks | 0.80 ms | **3.00×** |
 
-1 → 4 workers is **3.01×** on the board. One block is 163.84 s of signal at the
-100 Hz design rate, and it is sorted in 0.757 ms — about **200 000 times faster
+These are the means of the board's thread sweep (three repeats per channel, one
+block each — `perf-sweep.sh threads`, scored by `tools/filter_sweep.py`). The
+separate `test_kpi` benchmark, best of 20 runs, measured 3.010 / 1.631 / 1.011 ms
+at 1 / 2 / 4 workers (2.98×), so the two agree.
+
+1 → 4 workers is **3.00×** on the board. One block is 163.84 s of signal at the
+100 Hz design rate, and it is sorted in 0.80 ms — about **200 000 times faster
 than the data arrives** at that rate. The generated recording samples the solver
 unevenly, ~74.8 ms per sample (13.36 Hz), so a block is 1226 s of *that* stream
 and the headroom is larger still. The millisecond figures wobble between runs; the
@@ -411,10 +421,11 @@ server, so a run in flight has about six threads of ours alive:
 | The rolling median filter | **0 of its own** — single-threaded | `median_filter_block()` is a plain function on the caller's thread; it adds no threads anywhere |
 
 The filter is why four workers do not make a block four times faster: a whole block
-takes **~7.3 ms** of server time, of which the sort is **0.757 ms** and the filter
-plus checksums are the rest (~6.5 ms). It is serial by nature — every output sample
-needs its neighbours — and the API already takes `left`/`right` context arrays, so
-it could be split across workers later without changing its interface.
+takes **~7.5 ms** of server time at width 9 — the sort is **0.80 ms** and the
+filter plus checksums are the rest (~6.5 ms) — and **~12.2 ms** at width 15, the
+width the demo uses. The filter is serial by nature, every output sample needs its
+neighbours, and the API already takes `left`/`right` context arrays, so it could be
+split across workers later without changing its interface.
 
 ### How the sort is tested (`tests/test_mergesort.c`, 13 tests / 578 checks)
 
@@ -447,7 +458,7 @@ T_CHECK(same_values(work, reference, n));   /* reference == qsort(input) */
   client offloads continuously, so the natural unit is a parcel.
 - *Why not one thread per channel (voltage, current, temperature, time)?* A block
   carries one channel, and one channel's 16 384 numbers already keep four cores
-  busy (3.01×, 0.757 ms). Splitting by channel would add coordination for nothing;
+  busy (3.00×, 0.80 ms). Splitting by channel would add coordination for nothing;
   the protocol can do it later (per-job ids, four result slots) if the units ever
   get small.
 - *Where do the numbers live while they are being sorted?* In a scratch buffer of
@@ -496,26 +507,27 @@ flowchart LR
 
 ### The filter, measured (all four channels, on the board)
 
-Against the dataset's clean signal, with the default width 9 and threshold 4 σ:
+Against the dataset's clean signal, at width 15 with the 4 σ threshold:
 
-| Channel | RMSE before → after | Gain | Samples the filter changed | Samples that ended closer to the truth |
-| --- | --- | --- | --- | --- |
-| voltage | 23.99 → 3.89 mV | 6.17× | 1502 of 60 000 | 1464 |
-| current | — | 10.79× | 1548 of 60 000 | 1514 |
-| temperature | — | 2.00× | 1488 of 60 000 | 1458 |
-| time | 0 → 0 | already exact | **0** | 0 |
+| Channel | RMSE before → after | Gain | MAE | p99 | Replaced |
+| --- | --- | --- | --- | --- | --- |
+| voltage | 23.99 → 1.98 mV | **12.1×** | 3.21 → 1.56 mV | 43.96 → 4.97 mV | 1 188 of 60 000 |
+| current | 158.8 → 8.53 mA | **18.6×** | 13.55 → 6.25 mA | 137.8 → 20.1 mA | 1 138 |
+| temperature | 233.9 → 63.8 mK | **3.67×** | 70.9 → 47.6 mK | 1.134 → 0.153 K | 1 177 |
+| time | exact before and after | — | — | — | **0** |
 
-Voltage in absolute terms: the noise sits at a median of 1.37 mV with spikes up to
-890 mV; the filter takes the 99th-percentile error from 43.96 mV to 5.28 mV and the
-MAE from 3.22 mV to 1.735 mV. The `time` column carries no injected corruption and
-came back **byte-identical** to the input — that is the evidence it is not
-over-eager.
+These are the width-15 numbers — the width the sweeps picked as optimal and the one
+the demo runs. At the build's default 9 the gains were 6.17× / 10.79× / 2.00×, which
+is the width-9 figure set the deck's assets were built from. The `time` column
+carries no injected corruption and came back **byte-identical** to the input — that
+is the evidence it is not over-eager.
 
 What it does *not* do, worth saying before it is asked:
 
-- **Bursts wider than 4 samples survive.** A 9-wide median cannot remove a fault
-  longer than (9−1)/2 = 4 samples, so the dataset's burst and dropout faults set the
-  residual worst-case error; spikes and dropout tails are cleaned.
+- **Faults wider than the half-window survive.** A width-*w* median cannot remove a
+  fault longer than (w−1)/2 samples — 4 samples at the default 9, 7 at the demo's 15.
+  The dataset's worst bursts are 6 samples, which is exactly why 15 was chosen; at 9
+  they set the residual worst-case error.
 - **It is not a smoother.** The filtered curve still carries the ±1.4 mV broadband
   noise by design — say "spikes and impulses removed", never "noise removed".
 - **The threshold is a deliberate trade.** From a 100-seed sweep: 4 σ misses about
@@ -550,6 +562,17 @@ What it does *not* do, worth saying before it is asked:
 - That last figure, `elapsed_ns`, is what the timing half of the report is built
   from: same work, more workers, less time.
 
+**What was measured on the board, and where it is.** All of this is in
+`run-figures/` and [TESTING.md](TESTING.md):
+
+| Run | What it showed |
+| --- | --- |
+| Width sweep, 3…31 | recall, clean-sample replacement, RMSE gain and block time per width; **15 is the knee** (98.6 % recall, 12.14× gain, 12.19 ms/block) and past it nothing improves while the time doubles and triples |
+| Thread sweep, 1…4 | sort 2.40 → 1.32 → 1.09 → 0.80 ms per block = **3.00×**, medians unchanged |
+| Soak, 20 runs | every run completed, every run **identical medians**; service 7.21 ms/block at width 9 |
+| Client deadline | gives up at 10 s with no server; connects when the server starts 3 s late |
+| Figures | `sort_*`, `filter_*` per channel and `error_map.png` — one idea each, regenerated by `tools/result_plots.py` |
+
 **If they ask about `sigevent` — the honest answer.** The code does not use the
 `sigevent` *structure*; it uses a QNX pulse, which is the same asynchronous event in
 its connected form:
@@ -578,7 +601,7 @@ server would still need the console.
 ### The machinery
 
 There is no test framework. Each file in `RT-MOMS/tests/` is a normal C program
-that includes `test_util.h` and calls check macros; `make check` builds all four
+that includes `test_util.h` and calls check macros; `make check` builds all six
 and runs them one after another, printing a summary per binary.
 
 ```c
@@ -600,7 +623,7 @@ static int t_summary(void) {
   not "equal", `T_CHECK_INT` prints both numbers on failure, and so on.
 - **`T_RUN(test_x)`** runs one test and prints its name: a line reading `ok`
   means every check inside it passed.
-- **The last line is the verdict**: `1473 checks, 0 failed, 0 skipped`. The
+- **The last line is the verdict**: `9 150 checks, 0 failed, 0 skipped`. The
   process exit status is 0 only if nothing failed, so `make check` stops on a
   failure.
 - **`skipped`** is not a failure: the payload tests need the generated dataset.
@@ -625,10 +648,13 @@ static int t_summary(void) {
 
 | Binary | The one-sentence question it answers | Checks |
 | --- | --- | --- |
-| `test_protocol` | "Is the contract exactly what both sides think it is — 64 KiB blocks, safe message numbers, a checksum that notices damage, a shared region whose arithmetic adds up?" | 137 |
+| `test_protocol` | "Is the contract exactly what both sides think it is — 64 KiB blocks, safe message numbers, a checksum that notices damage, a shared region whose arithmetic adds up?" | 186 |
 | `test_sensor` | "Does replaying a file behave like a device: same numbers however you read it, both file layouts agreeing, frames capped, clock exact, junk refused?" | 642 |
 | `test_block_loader` | "Does a stream become blocks and a label that survives the trip — split right, padded right, sealed over the right bytes?" | 116 |
 | `test_mergesort` | "Is a sorted block really sorted, really the same numbers, and really independent of how many threads did it?" | 578 |
+| `test_median` | "Does the rolling filter remove what it should, leave untouched what it should, agree with a reference Hampel implementation, and stay continuous across block seams?" | 7 615 |
+| `test_shared_memory` | "Does the results region's arithmetic add up, and are its bounds what the descriptor claims?" | 13 |
+| `test_kpi` (benchmark) | "On this silicon, how long does a block take to sort, filter and merge at 1 / 2 / 4 workers, and is the global median the same computed two ways?" | 79 |
 
 The per-module detail — each test and the bug it rules out — is in the M1 and M2
 sections above; this is the machinery and the vocabulary.
@@ -636,12 +662,13 @@ sections above; this is the machinery and the vocabulary.
 ### How to explain testing in three sentences
 
 > Every module has a testbench that runs as a plain C program on the host, and the
-> same four programs run on the board after cross-compiling. They do not just call
-> the code and check it does not crash: they compare it against an independent
-> answer — the standard library's `qsort`, or the same recording read through a
-> different layout — and they feed it broken input on purpose to prove it refuses.
-> The last line of each run is the headline: 1473 checks on the host, 0 failed, 0
-> skipped, and on the board the same counts against real telemetry.
+> same programs run on the board after cross-compiling. They do not just call the
+> code and check it does not crash: they compare it against an independent answer —
+> the standard library's `qsort`, or the same recording read through a different
+> layout, or a reference Hampel filter — and they feed it broken input on purpose to
+> prove it refuses. The last line of each run is the headline: 9 150 checks across
+> the six suites, 0 failed, 0 skipped, and on the board the same six suites return
+> the same counts against real telemetry.
 
 ---
 
@@ -866,7 +893,7 @@ strided = sensor_open(td_interleaved_path(), &cfg);      /* stride 4, offset 1 *
 contract, and most of it is checked by the compiler before the tests even run.
 Then the tests pin what a compiler cannot: the message numbers stay clear of
 QNX's range, the checksum notices a single changed byte, and a short block's
-unused tail cannot affect its seal." 12 tests, 137 checks.
+unused tail cannot affect its seal." 14 tests, 186 checks.
 
 ```c
 T_CHECK_SIZE(sizeof(proto_block_t), 65536);          /* the 64 KB claim */
@@ -898,10 +925,10 @@ instrument, they can compare against `qsort` and feed broken input. Fold two is 
 same programs cross-compiled and running on the board: a different compiler, a
 different C library and a different CPU. When the board prints the same counts and
 the same medians, the only thing left that could differ is the kernel — and that is
-what the shared-memory region and the pulse will exercise in M3/M4." Numbers to
-quote: **1473 checks on the host, 0 failed, 0 skipped**; on the board
-`test_protocol` 137, `test_block_loader` 116, `test_mergesort` 578 — all 0 failed,
-0 skipped.
+what the shared region and the pulse exercise, which M3/M4 did." Numbers to
+quote: **9 150 checks on the host, 0 failed, 0 skipped**; on the board the same six
+suites — 186 protocol, 642 sensor, 116 block loader, 578 mergesort, 7 615 median,
+13 shared memory — all 0 failed, 0 skipped.
 
 **Target Testbench Setup** — Hardware, not a simulator: Raspberry Pi 4 Model B,
 four Cortex-A72 cores, QNX 8.0.0 booting straight into RAM from the image on the
@@ -915,24 +942,30 @@ screenshot:
 | Slide | Say |
 | --- | --- |
 | Board boot | "All four cores come up (`procnto-smp-instr`), then the shell prompt — that prompt is the proof the image booted." |
-| Protocol layer | "The same suite as the host. Note the screenshot is from the image *before* the shared-results-region tests — it shows 82 checks; the current suite prints 137, so re-capture after the next flash." |
+| Protocol layer | "The same suite as the host: 186 checks, 0 failed, 0 skipped." |
 | Virtual sensor | "642 checks, and the `sensor: …` lines are the test failing on purpose — every one is followed by `ok`." |
 | Block loader | "116 checks: the interleaved file produces the same blocks and the same seals as the host." |
+| Median filter | "7 615 checks — by far the largest suite, because the filter has the most edge cases: seams, bursts, dropouts, tiny blocks, argument rejection." |
+| Shared memory | "13 checks over the region's bounds and arithmetic — and the run itself proves the bytes: the client's arrays match the host's to the bit." |
 | On-board payload | "`cksum` of the files inside the image matches the host's, then `loader_demo` accepts all four blocks — the data itself is bit-identical, not just the code." |
 | Live sensor streaming | "`sensor_demo` at 10 Hz, paced by the monotonic clock: the sensor can replay in real time, not as fast as the CPU allows." |
 | Parallel sorting | "578 checks on the board. The sort is not faster-but-different: the medians and the plan line are the host's." |
 | Multi-core execution | "Four workers, and the plan line reads `4 partitions, 2 merge phases, 7 tasks` — that line is the proof the parallel path ran." |
-| Core scaling sweep | "1 → 2 → 4 workers: 2.278 → 1.253 → 0.757 ms per block, with the medians unchanged." |
+| Core scaling sweep | "1 → 2 → 4 workers: 2.40 → 1.32 → 0.80 ms per block, with the medians unchanged." |
+| KPI benchmark | "Best of 20: 2.98× from one worker to four, and the global median computed two ways agreeing bit for bit." |
+| Client deadline | "No server: gives up at ten seconds. Server three seconds late: connects by itself. Both cases pass." |
+| Soak | "Twenty runs, twenty identical medians — the service is repeatable, not lucky." |
 
-**Benchmark Analysis and Throughput** — The table (1 / 1.82× / 3.01×) and the
+**Benchmark Analysis and Throughput** — The table (1 / 1.82× / 3.00×) and the
 headline: a 64 KiB block is **163.84 seconds** of telemetry at the 100 Hz design
-rate and it sorts in **0.757 ms**, about **216 000× real time**. Say which rate you
+rate and it sorts in **0.80 ms**, about **200 000× real time**. Say which rate you
 mean if asked: the generated recording's own time column advances ~74.8 ms per
 sample (13.36 Hz, 4489.8 s in all), so one block covers 1226 s of it — the headline
 uses the design rate, the file is the file. Then volunteer the caveats before
-anyone asks: "These are one run per point, so treat ±10–20 % as noise; the
-deterministic evidence is the plan line, and the *medians* being identical across
-thread counts is what shows the parallelism changed the speed, not the answer."
+anyone asks: "The sweep averages three repeats per point and the spread is a few
+per cent; the deterministic evidence is the plan line, and the *medians* being
+identical across thread counts is what shows the parallelism changed the speed, not
+the answer."
 
 ### Applications & Conclusion
 
@@ -943,13 +976,16 @@ automotive telemetry (deterministic, reproducible sorting across bus channels),
 flight data recorders (verifiable, checksummed statistical descriptors).
 
 **Summary and Project Status** — Say where we are: all four milestones complete and
-verified on hardware; 1473 host checks plus the on-board suites; 0.757 ms per block
-for the sort and 3.01× on four cores; and the full service ran end to end on all
-four channels, with every channel's medians and arrays matching the host exactly.
-Have the filter numbers ready too (M3's table: 6.17× / 10.79× / 2.00× on RMSE, and
-zero replacements on the clean timestamp column). If asked what is left: two console
-screenshots were taken from earlier images and should be re-captured, and the report
-itself.
+verified on hardware; **9 150 checks** across the six suites, on host and board; the
+sort 3.00× on four cores (0.80 ms per block); and the full service ran end to end on
+all four channels twice — at width 9 and at width 15 — with every channel's medians
+and arrays matching the host exactly. Have the filter numbers ready at width 15:
+**12.1× / 18.6× / 3.67×** on RMSE, zero replacements on the clean timestamp column.
+The measurement campaign is finished: the width sweep picked 15, the thread sweep
+confirmed 3× scaling, a 20-run soak showed identical medians every run, and the
+client's ten-second deadline passes both cases. If asked what is left: the report —
+its LaTeX template is converted and compiling in `report/` — and refreshing the
+deck's run figures, which are still the width-9 renders.
 
 *Two lines in the deck are worth correcting before the presentation:*
 `proto_checksum_block(...)` on the block-loader code slide is not a function we
@@ -967,13 +1003,13 @@ have, and the merge-sort testbench slide says the invariance test covers
 | One parcel | 16 384 numbers = exactly 64 KB |
 | One recording | 60 000 readings = 3 full parcels + 10 848 |
 | Sort plan with 4 workers | 4 partitions, 2 merge phases, 7 tasks |
-| Time per parcel on the board | 0.757 ms sort (one worker: 2.278 ms, so 3.01×); ~7.3 ms for the whole server block, filter and checksums included |
-| Speed versus the data | 163.84 s of signal at the 100 Hz design rate sorted in 0.757 ms ≈ 200 000× real time; one block is 1226 s of the generated recording's own 13.36 Hz stream |
+| Time per parcel on the board | 0.80 ms sort (one worker: 2.40 ms, so 3.00×); ~7.5 ms for the whole server block at width 9 and ~12.2 ms at width 15, filter and checksums included |
+| Speed versus the data | 163.84 s of signal at the 100 Hz design rate sorted in 0.80 ms ≈ 200 000× real time; one block is 1226 s of the generated recording's own 13.36 Hz stream |
 | Threads | 4 sort workers created once per process, 1 server dispatcher, 1 client; the rolling filter is single-threaded |
-| Filter against truth | RMSE 6.17× / 10.79× / 2.00× better on voltage / current / temperature; a clean channel left byte-identical |
-| Four-channel run | every channel's medians, sorted arrays and filtered arrays matched the host exactly, 2026-10-17 |
-| Tests | 48 tests, 1473 checks on the host; the sort's 578 also pass on the board |
-| Boot image | 37 742 192 B, SHA-256 `57637557…4588c49` — seven programs and the data inside one file |
+| Filter against truth | RMSE 12.1× / 18.6× / 3.67× better on voltage / current / temperature at width 15 (6.17× / 10.79× / 2.00× at the default 9); a clean channel left byte-identical |
+| Four-channel run | every channel's medians, sorted arrays and filtered arrays matched the host exactly — at width 9 on 2026-10-17, and again at width 15 |
+| Tests | six suites, 9 150 checks on the host and the same six on the board, 0 failed, 0 skipped, plus the 79-check KPI benchmark |
+| Boot image | 37 797 716 B, SHA-256 `2ac01f08…31fc9d8b` — the service, the demos, seven suites, the three board scripts and the data in one file |
 
 ---
 
@@ -985,4 +1021,4 @@ have, and the merge-sort testbench slide says the invariance test covers
 > pairs until one sorted pile remains — and filters it with a rolling median to
 > drop sensor spikes. When it is finished it taps the client with a pulse, and the
 > client fetches the median and the address of the results. On the Raspberry Pi
-> one parcel takes 0.757 ms with four workers against 2.278 ms with one.
+> one parcel takes 0.80 ms with four workers against 2.40 ms with one.
