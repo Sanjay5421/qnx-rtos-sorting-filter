@@ -269,34 +269,29 @@ On the PC, once per channel directory (the card's drive letter, or a copy of it)
 
 ```sh
 cd data
-for ch in voltage current temperature time; do
-    uv run python ../tools/plot_run.py "D:/$ch" --channel $ch --out "../run-figures/$ch"
-    uv run python ../tools/plot_vs_truth.py "D:/$ch" --out "../run-figures/$ch"
-done
+uv run python ../tools/result_plots.py "D:/" --out ../run-figures --npz artifacts/dataset/battery_sensor_dataset.npz
 ```
 
-Each channel gets its own directory, eight PNGs in each — `plot_run.py` needs
-`--channel` because the run files carry no channel name, while `plot_vs_truth.py`
-works it out by matching `raw.bin` against the dataset.
+`D:/` is the card's drive letter: the four channel directories must sit under one
+root, as `voltage/ current/ temperature/ time/` do on the card. Each channel gets
+five figures of its own — `sort_curve_<ch>.png`, the whole recording against its
+ascending order, one idea: the same values placed in order; `sort_multiset_<ch>.png`,
+the received and sorted histograms, which must coincide; `filter_overlay_<ch>.png`,
+what arrived against what the service returned; `filter_error_<ch>.png`, the error
+against the dataset's clean series before and after; and `filter_zoom_<ch>.png`,
+three windows zoomed onto where the filter acted most — plus one figure for the
+whole run, `error_map.png`, which puts the three sensor channels' error over time,
+before and after the filter, on one shared colour scale, in units of each channel's
+own noise sigma. The time channel carries no injected corruption, so it gets the
+two sorting figures and no filter figures: there would be nothing to show.
 
-`plot_run.py` reads what the board produced and writes four PNGs:
-`run_cleaned_vs_noisy.png` — the received series as a min-max envelope with the
-filtered line over it and every replaced sample marked; `run_zoom.png` — three
-two-second windows where spikes are visibly cut; `run_sorted_proof.png` — as
-received against sorted, with the non-decreasing and same-values checks printed on
-it; `run_summary.png` — the per-block medians and when samples were replaced. A
-missing `sorted.bin` or `medians.csv` just drops its panel.
-
-`plot_vs_truth.py` compares the same directory against the dataset's ground truth —
-the clean signal and the injected outliers: `truth_full.png`, `truth_zooms.png`,
-`truth_error.png` (error distribution and error over time, before and after the
-filter) and `truth_columns.png`, the block medians of all four columns of that
-recording. It identifies the run and the channel by matching `raw.bin` against the
-dataset, so it takes no channel argument, and it prints the matched run, the error
-metrics and the per-column median table. Its medians use the service's own
-definition (`median_of_sorted`: the mean of the two middle values for an
-even-sized block), which is why `truth_columns.png` reproduces `medians.csv` to
-the last digit.
+The script prints what belongs in a caption instead of printing it inside the
+figure — the matched run and column, the samples replaced, RMSE, MAE and p99 — and
+it checks the claims the figures make: `sorted.bin` must be an ascending, bit-exact
+permutation of `raw.bin`, and each block median in `medians.csv` must be the median
+of that block's raw samples. The second is the one that matters: `sorted.bin` is the
+*client's* own global sort, the by-product of its cross-check, while the server's
+per-block sort is evidenced by the medians the completion pulse carried.
 
 What those figures showed for this run:
 

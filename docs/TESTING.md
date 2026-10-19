@@ -6,7 +6,7 @@ Three places things run, and none of them substitutes for the others:
 | --- | --- | --- |
 | **Host** (Windows + MSYS2/MinGW, or Linux/macOS) | the unit suites and the KPI harness | the algorithms: sorting, the filter, the loader, the message layout, the validation |
 | **Board** (QNX 8 on the Pi 4) | the same suites, the service itself, the sweep scripts, the soak | that the real service on real hardware does what the host tests say — and how long it takes |
-| **PC afterwards** | `tools/filter_sweep.py`, `plot_run.py`, `plot_vs_truth.py` | what a run's own output files mean against ground truth |
+| **PC afterwards** | `tools/filter_sweep.py`, `tools/result_plots.py` | what a run's own output files mean against ground truth |
 
 Nothing about *timing* is measured on the host or in a VM: every number in the
 report comes from the board, produced by the board's own build.
@@ -241,14 +241,20 @@ heat map shows the same thing cell by cell.
 
 ```sh
 cd data
-uv run python ../tools/plot_run.py "../tools/voltage" --channel voltage --out ../run-figures/voltage
-uv run python ../tools/plot_vs_truth.py "../tools/voltage" --out ../run-figures/voltage
+uv run python ../tools/result_plots.py ../tools --out ../run-figures --npz artifacts/dataset/battery_sensor_dataset.npz
 ```
 
-`plot_run.py` needs `--channel` because the run's files carry no channel name;
-`plot_vs_truth.py` works the channel out by matching `raw.bin` against the
-dataset. Both take a directory holding a run's four files, so point them at a
-copied-back case directory from the sweep if that is what you want to look at.
+It takes the directory that holds one subdirectory per channel, as `tools/` does
+after a card is copied back, and writes each channel its own figures plus the
+cross-channel `error_map.png`. `--only voltage` draws a single channel, and
+`--out ../run-figures/trial` keeps a trial set away from the published one.
+
+Besides the figures it prints what belongs in a caption — the matched run and
+column, the samples replaced, RMSE, MAE and p99 before and after — and it checks
+what the figures claim: that `sorted.bin` is an ascending, bit-exact permutation
+of `raw.bin`, and that every block median in `medians.csv` is the median of that
+block's own raw samples, which is the evidence that the *server* sorted each
+block correctly.
 
 ---
 
