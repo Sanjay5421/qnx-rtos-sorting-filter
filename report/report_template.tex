@@ -1,0 +1,179 @@
+% ============================================================================
+%  26ELC331 Real Time Operating System using QNX -- report template
+%
+%  Converted from "Report Template.docx", which sits beside this file: same
+%  structure, same wording, nothing added. The two images under images/ were
+%  extracted from the .docx and are placed at the sizes the document gave them.
+%
+%  Compile:  latexmk -pdf report_template.tex        (from this directory)
+% ============================================================================
+\documentclass[12pt,a4paper]{report}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{graphicx}
+\usepackage{amsmath}
+
+% The template's reference list is headed "References", not "Bibliography".
+\renewcommand{\bibname}{References}
+
+\begin{document}
+
+% ---------------------------------------------------------------------------
+% Title page
+% ---------------------------------------------------------------------------
+\begin{titlepage}
+  \centering
+  {\Large\bfseries TITLE OF YOUR PROJECT\par}
+  \vspace{1.5em}
+  A Report\par
+  \vspace{1.5em}
+  Submitted for the course\par
+  26ELC331 Real Time Operating system using QNX\par
+  \vspace{1.5em}
+  by\par
+  \vspace{0.5em}
+  {\bfseries WRITE YOUR NAME\par}
+  \vspace{2em}
+  \includegraphics[width=4.952in,height=1.331in]{images/image1.png}\par
+  \vspace{1.5em}
+  YOUR DEPARTMENT / CENTRE NAME\par
+  \vspace{0.5em}
+  {\bfseries AMRITA VISHWA VIDYAPEETHAM\par}
+  \vspace{0.5em}
+  COIMBATORE CAMPUS (INDIA)\par
+  \vspace{1.5em}
+  Month Year \textit{(to be updated as per your defense date during final
+  submission)}\par
+\end{titlepage}
+
+% ---------------------------------------------------------------------------
+% Letterhead page and Contents
+% ---------------------------------------------------------------------------
+\begin{center}
+  YOUR DEPARTMENT / CENTRE NAME\par
+  \vspace{0.5em}
+  {\bfseries AMRITA VISHWA VIDYAPEETHAM\par}
+  \vspace{0.5em}
+  COIMBATORE CAMPUS\par
+\end{center}
+\vspace{2em}
+
+\pagenumbering{roman}
+\tableofcontents
+
+% ---------------------------------------------------------------------------
+% The lists the Contents above refers to
+% ---------------------------------------------------------------------------
+\clearpage
+\addcontentsline{toc}{chapter}{List of Figures}
+\listoffigures
+
+\clearpage
+\addcontentsline{toc}{chapter}{List of Tables}
+\listoftables
+
+\clearpage
+\addcontentsline{toc}{chapter}{Abbreviations}
+\chapter*{Abbreviations}
+TT -- Truth Table
+
+ANF -- Algebraic Normal Form
+
+\clearpage
+\addcontentsline{toc}{chapter}{List of symbols}
+\chapter*{List of symbols}
+$F_q$ -- Finite field with $q$ elements
+
+$\oplus$ -- Exclusive or (XOR)
+
+% ---------------------------------------------------------------------------
+% Chapters
+% ---------------------------------------------------------------------------
+\clearpage
+\pagenumbering{arabic}
+
+\chapter{Introduction}
+
+\section{title of first section in this chapter}
+
+A literature review is much more than a list of separate reviews of articles
+and books. They are common and very important in the sciences. A literature
+review is a critical, analytical summary and synthesis of the current knowledge
+of a topic. It should compare and relate different theories, findings, and so
+on, rather than just summarize them individually. It should also have a
+particular focus or theme to organize the review. It does not have to be an
+exhaustive account of everything published on the topic. But it should discuss
+all the more significant academic literature important for that focus.
+
+\section{second section if any}
+
+\section{third section if any}
+
+\section{fourth section if any}
+
+\section{fifth section if any}
+
+\chapter{System Overview}
+
+\section{Introduction}
+
+\section{Block diagram and description}
+
+\section{Flow chart of different processes, Data flow diagram}
+
+\subsection{write y}
+
+% The next two lines are the template's own bold placeholders, kept as text so
+% they do not add entries of their own.
+\textbf{subsection if any}
+
+\textbf{Is a subsubsection if any} Molucular biology $\lambda = 4a^2 \quad
+\lambda = 4a_{23} \quad a_2\, a_D b$
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=1.9167in,height=1.2708in]{images/image2.jpg}
+  \caption{This is my figure}
+\end{figure}
+
+where is he going to this paper is written by [1] some author [2]
+
+\subsection{your sub section if any}
+
+\subsection{This is your subsection}
+
+\chapter{Process Implementation}
+
+\section{title of first section of this chap}
+
+\chapter{Results and Discussions}
+
+\section{title of first section of this chap}
+
+\chapter{Conclusion and Scope for further Research}
+
+% ---------------------------------------------------------------------------
+% Appendix
+% ---------------------------------------------------------------------------
+\appendix
+\chapter{title of appendix}
+
+% ---------------------------------------------------------------------------
+% References
+% ---------------------------------------------------------------------------
+\addcontentsline{toc}{chapter}{References}
+\begin{thebibliography}{9}
+
+\bibitem{ref1}
+M. X, M. Y, M. Z, and Narra, ``Nano hydroxyapatite structured at the nanometre
+scale,'' \textit{CHEST Journal}, vol. 108, no. 1, pp. 73--77, 1995.
+
+\bibitem{ref2}
+M. X, M. Y, M. Z, and Marcos, ``Linearity testing in characteristic three,''
+\textit{Information Theory, IEEE Transactions on}, vol. 42, no. 6,
+pp. 1781--1795, 1996.
+
+\end{thebibliography}
+
+\end{document}

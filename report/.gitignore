@@ -1,0 +1,10 @@
+# LaTeX build products; the .tex regenerates everything here
+*.aux
+*.log
+*.out
+*.toc
+*.lof
+*.lot
+*.fls
+*.fdb_latexmk
+*.synctex.gz
