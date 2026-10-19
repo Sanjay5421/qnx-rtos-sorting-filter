@@ -79,6 +79,8 @@ SIGMA_KEYS = {"voltage": "voltage_sigma_v",
 
 # Okabe-Ito, the colour-blind-safe set the sweep figures use.
 RECEIVED = "#999999"               # what the sensor reported, outliers and all
+RECEIVED_LINE = "#565d64"          # the same, for zoomed traces where the grey
+                                   # envelope would be too faint to follow
 SERVICE = "#0072B2"                # what the service returned
 TRUTH = "#111111"                  # the dataset's clean series
 FLAG = "#D55E00"                   # the values the filter replaced
@@ -247,20 +249,29 @@ def fig_sort_curve(raw, ordered, out, channel, unit):
 
 
 def fig_sort_multiset(raw, ordered, out, channel, unit):
-    """The values, not their order. The two histograms must sit on top of one
-    another: the sort permutes, it cannot create or lose a sample."""
+    """The values, not their order, compared bin by bin. Two histograms drawn on
+    top of one another prove nothing to the eye; counting both into the same bins
+    and plotting the counts against one another does -- every point has to sit on
+    the identity line, and a single lost or invented sample would leave it."""
     lo = float(min(raw.min(), ordered.min()))
     hi = float(max(raw.max(), ordered.max()))
     bins = np.linspace(lo, hi, 120)
-    fig, ax = plt.subplots(figsize=(11, 5.6), dpi=DPI)
-    ax.hist(ordered, bins=bins, color=SERVICE, alpha=0.45,
-            label="after the sort", zorder=2)
-    ax.hist(raw, bins=bins, histtype="step", color=RECEIVED, linewidth=1.6,
-            label="before the sort", zorder=3)
-    ax.set_yscale("log")
-    style(ax, "samples per bin (log)", f"{channel} ({unit})")
-    ax.set_title("The same values before and after: the sort only reorders")
-    ax.legend(loc="best", frameon=False)
+    before = np.histogram(raw, bins=bins)[0]
+    after = np.histogram(ordered, bins=bins)[0]
+    top = float(max(before.max(), after.max()))
+
+    fig, ax = plt.subplots(figsize=(7.8, 7.4), dpi=DPI)
+    ax.plot([0, top], [0, top], color=TRUTH, linewidth=1.3, linestyle="--",
+            label="identical counts", zorder=2)
+    scatter = ax.scatter(before, after, c=(bins[:-1] + bins[1:]) / 2.0,
+                         cmap="magma", s=38, zorder=3, edgecolors="white",
+                         linewidths=0.7)
+    style(ax, f"samples holding that value, after the sort",
+          f"samples holding that value, as received ({channel}, {unit})")
+    ax.set_title(f"All {before.size} value bins hold the same count either way")
+    ax.legend(loc="upper left", frameon=False)
+    bar = fig.colorbar(scatter, ax=ax, pad=0.02)
+    bar.set_label(f"bin centre ({unit})")
     fig.savefig(out / f"sort_multiset_{channel}.png", dpi=DPI)
     plt.close(fig)
 
@@ -307,24 +318,28 @@ def fig_filter_zoom(raw, filtered, truth, changed, out, channel, unit, windows):
     """Three windows, zoomed onto where the filter acted most: the received
     samples, the answer, and the truth they are both trying to be."""
     rows = len(windows)
-    fig, axes = plt.subplots(rows, 1, figsize=(12.5, 3.1 * rows), dpi=DPI,
+    fig, axes = plt.subplots(rows, 1, figsize=(12.5, 3.2 * rows), dpi=DPI,
                              sharey=True)
     for ax, start in zip(np.atleast_1d(axes), windows):
         stop = min(start + int(2.0 * RATE_HZ), raw.size)
         t = np.arange(start, stop) / RATE_HZ
-        ax.plot(t, raw[start:stop], color=RECEIVED, linewidth=1.2,
-                marker="o", markersize=2.4, label="received")
-        ax.plot(t, filtered[start:stop], color=SERVICE, linewidth=1.6,
+        # Shade every sample the filter replaced, so what acted is visible at a
+        # glance instead of having to be looked for.
+        for at in np.nonzero(changed[start:stop])[0]:
+            ax.axvspan(t[at] - 0.5 / RATE_HZ, t[at] + 0.5 / RATE_HZ,
+                       color=FLAG, alpha=0.20, linewidth=0)
+        ax.plot(t, raw[start:stop], color=RECEIVED_LINE, linewidth=1.8,
+                marker="o", markersize=3.2, label="received")
+        ax.plot(t, filtered[start:stop], color=SERVICE, linewidth=2.5,
                 label="filtered")
-        ax.plot(t, truth[start:stop], color=TRUTH, linewidth=1.0,
+        ax.plot(t, truth[start:stop], color=TRUTH, linewidth=1.2,
                 linestyle="--", label="ground truth")
-        n_flag = int(changed[start:stop].sum())
-        ax.set_title(f"{t[0]:.1f} s  ({n_flag} samples replaced)", fontsize=13)
+        ax.set_title(f"{t[0]:.1f} s — {int(changed[start:stop].sum())} samples "
+                     f"replaced, shaded", fontsize=13)
         style(ax, f"{channel} ({unit})")
         if ax is np.atleast_1d(axes)[-1]:
             ax.set_xlabel("time (s)")
-    axes0 = np.atleast_1d(axes)[0]
-    axes0.legend(loc="best", frameon=False, ncols=3)
+    np.atleast_1d(axes)[0].legend(loc="best", frameon=False, ncols=3)
     fig.suptitle("Where the filter acted, magnified", y=1.0, fontsize=16)
     fig.tight_layout()
     fig.savefig(out / f"filter_zoom_{channel}.png", dpi=DPI)
@@ -356,6 +371,11 @@ def fig_error_map(rows, out):
                             (axes[1], after, "after the filter")):
         mesh = ax.pcolormesh(x_edges, np.arange(len(channels) + 1), grid,
                              cmap="magma", norm=norm, shading="flat")
+        # A white band between the rows, so three channels cannot read as one
+        # continuous field of colour.
+        for edge in range(1, len(channels)):
+            ax.axhline(edge, color="white", linewidth=3.5, zorder=3)
+        ax.set_ylim(0, len(channels))
         ax.set_yticks(np.arange(len(channels)) + 0.5)
         ax.set_yticklabels(channels)
         ax.set_title(title, fontsize=14)
