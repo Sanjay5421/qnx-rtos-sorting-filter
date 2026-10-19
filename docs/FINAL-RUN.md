@@ -109,7 +109,7 @@ mount -t dos /dev/sd0t12 /var/mnt
 for ch in voltage current temperature time; do
     mkdir -p /var/mnt/$ch
     cd /var/mnt/$ch
-    sortmed-client /data/bin/Chen2020_c1_T25_discharge.bin interleaved $ch 100
+    sortmed-client -w 15 /data/bin/Chen2020_c1_T25_discharge.bin interleaved $ch 100
     cd /
 done
 
@@ -126,6 +126,35 @@ Arguments: the recording, its layout (`planar` or `interleaved`), the channel to
 work on (`time`, `current`, `voltage`, `temperature`), and the sample rate — a
 nominal flag the client uses only for the durations it prints. The recording's own
 time column is the real one: it advances ~74.8 ms per sample, not 10 ms.
+
+### The width to demo: `-w 15`
+
+The `-w 15` in the loop is the measured optimum, not the build's default.
+`MEDIAN_DEFAULT_WIDTH` is 9; the 2026-10-17 run above used it. The width sweep
+(`tools/filter_sweep.py` over what `perf-sweep.sh` collected on the board) says 15
+is the smallest width that reaches the plateau, and that the default's 9 leaves a
+quarter of the injected outliers unreplaced:
+
+| width | recall | clean samples replaced | RMSE gain | block time |
+| --- | --- | --- | --- | --- |
+| 9 — the default | 73.8 % | 1.42 % | 6.2x | 6.7 ms |
+| 13 | 93.8 % | 0.71 % | 9.9x | 10.2 ms |
+| **15** | **98.6 %** | **0.52 %** | **12.1x** | **12.2 ms** |
+| 21 | 98.9 % | 0.26 % | 12.3x | 19.7 ms |
+| 31 | 98.9 % | 0.11 % | 12.2x | 35.6 ms |
+
+Voltage channel, 64 KiB blocks, means over the three repeats of each case. Past 15
+every quality number is flat to within a third of a point while the time doubles
+and then triples, which is why the demo uses 15. The payload's own corruption is
+fully inside that reach: the generator injects bursts of at most 6 samples and
+dropouts of at most 4. The default is deliberately left at 9 — changing it would
+mean a new image and a new hash in section 1 — and passing `-w` is exactly what the
+per-job width field is for.
+
+**The width does not move the medians.** They are computed from the raw sorted
+data, so the `pulse:` lines, `global_median` and the `cross-check:` line must
+reproduce the 2026-10-17 numbers above exactly. `outliers=`, `elapsed=`,
+`rolling_filter_width=` and `filtered.bin` are what change.
 
 Expected output — one line per block, then a summary, then the write-back:
 

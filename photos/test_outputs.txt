@@ -161,6 +161,61 @@ global merge over the recording's four sorted blocks:
 
 79 checks, 0 failures
 # 
+# sh /bin/client-wait-test.sh
+case 1: no server -- the client must give up after about ten seconds
+  ok: exit 1, and the deadline the client reported was reached
+case 2: server three seconds late -- the client must connect by itself
+  ok: the client waited for the server, then completed the run
+client-wait-test: both cases pass
+# 
+# 
+# 
+
+  [6] w9_t1_current_r3
+  [7] w9_t1_temperature_r1
+# sh /bin/soak.sh 20
+run 1: ok
+        timing: run_ns=34989815 blocks=4 submit_avg_ns=194768 service_avg_ns=7219403 fetch_avg_ns=90087 block_avg_ns=7504259 server_avg_ns=6775740
+run 2: ok, same medians
+        timing: run_ns=34992444 blocks=4 submit_avg_ns=196037 service_avg_ns=7205791 fetch_avg_ns=98458 block_avg_ns=7500287 server_avg_ns=6764287
+run 3: ok, same medians
+        timing: run_ns=35053685 blocks=4 submit_avg_ns=195458 service_avg_ns=7221370 fetch_avg_ns=107226 block_avg_ns=7524055 server_avg_ns=6766690
+run 4: ok, same medians
+        timing: run_ns=34944778 blocks=4 submit_avg_ns=194194 service_avg_ns=7199680 fetch_avg_ns=100843 block_avg_ns=7494717 server_avg_ns=6757106
+run 5: ok, same medians
+        timing: run_ns=35010778 blocks=4 submit_avg_ns=201212 service_avg_ns=7213602 fetch_avg_ns=96375 block_avg_ns=7511189 server_avg_ns=6770699
+run 6: ok, same medians
+        timing: run_ns=35073944 blocks=4 submit_avg_ns=196120 service_avg_ns=7213953 fetch_avg_ns=107361 block_avg_ns=7517435 server_avg_ns=6762264
+run 7: ok, same medians
+        timing: run_ns=35057537 blocks=4 submit_avg_ns=196389 service_avg_ns=7218277 fetch_avg_ns=100703 block_avg_ns=7515370 server_avg_ns=6770124
+run 8: ok, same medians
+        timing: run_ns=35007963 blocks=4 submit_avg_ns=196528 service_avg_ns=7212148 fetch_avg_ns=100671 block_avg_ns=7509347 server_avg_ns=6764759
+run 9: ok, same medians
+        timing: run_ns=35073445 blocks=4 submit_avg_ns=195213 service_avg_ns=7220967 fetch_avg_ns=108671 block_avg_ns=7524852 server_avg_ns=6774583
+run 10: ok, same medians
+        timing: run_ns=34979852 blocks=4 submit_avg_ns=195046 service_avg_ns=7197342 fetch_avg_ns=102991 block_avg_ns=7495379 server_avg_ns=6759666
+run 11: ok, same medians
+        timing: run_ns=35028926 blocks=4 submit_avg_ns=196065 service_avg_ns=7213240 fetch_avg_ns=103240 block_avg_ns=7512546 server_avg_ns=6771550
+run 12: ok, same medians
+        timing: run_ns=35021722 blocks=4 submit_avg_ns=196482 service_avg_ns=7205671 fetch_avg_ns=106680 block_avg_ns=7508833 server_avg_ns=6767060
+run 13: ok, same medians
+        timing: run_ns=35042315 blocks=4 submit_avg_ns=195731 service_avg_ns=7217972 fetch_avg_ns=100902 block_avg_ns=7514606 server_avg_ns=6771402
+run 14: ok, same medians
+        timing: run_ns=35079796 blocks=4 submit_avg_ns=196333 service_avg_ns=7225514 fetch_avg_ns=99606 block_avg_ns=7521453 server_avg_ns=6780528
+run 15: ok, same medians
+        timing: run_ns=35075648 blocks=4 submit_avg_ns=197722 service_avg_ns=7220532 fetch_avg_ns=107185 block_avg_ns=7525440 server_avg_ns=6767208
+run 16: ok, same medians
+        timing: run_ns=34999315 blocks=4 submit_avg_ns=195305 service_avg_ns=7214435 fetch_avg_ns=97560 block_avg_ns=7507300 server_avg_ns=6772879
+run 17: ok, same medians
+        timing: run_ns=35005518 blocks=4 submit_avg_ns=196083 service_avg_ns=7207347 fetch_avg_ns=98407 block_avg_ns=7501838 server_avg_ns=6763843
+run 18: ok, same medians
+        timing: run_ns=35119981 blocks=4 submit_avg_ns=197476 service_avg_ns=7226606 fetch_avg_ns=108287 block_avg_ns=7532370 server_avg_ns=6776671
+run 19: ok, same medians
+        timing: run_ns=35006463 blocks=4 submit_avg_ns=196421 service_avg_ns=7204180 fetch_avg_ns=102018 block_avg_ns=7502620 server_avg_ns=6767194
+run 20: ok, same medians
+        timing: run_ns=34952944 blocks=4 submit_avg_ns=195495 service_avg_ns=7207148 fetch_avg_ns=95319 block_avg_ns=7497962 server_avg_ns=6762004
+soak: 20 runs, all completed, all with identical medians
+# 
 
 
 
