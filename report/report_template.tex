@@ -9,9 +9,11 @@
 \usepackage{newtxtext,newtxmath}
 \usepackage{setspace}
 \usepackage{graphicx}
+\usepackage{float}
+\graphicspath{{./}{../}{report/}}
 \usepackage{pdflscape}
 \usepackage{tikz}
-\usetikzlibrary{arrows.meta,positioning,fit}
+\usetikzlibrary{arrows.meta,positioning,fit,patterns,decorations.pathreplacing}
 \usepackage{listings}
 \lstset{
   language=C,
@@ -257,6 +259,24 @@ The system is based on a client-server model running on QNX. The client reads da
   \label{fig:block-diagram}
 \end{figure}
 \end{landscape}
+
+\subsection{Hardware Setup}
+
+The system was deployed on a Raspberry Pi 4 running QNX Neutrino RTOS.
+The hardware setup diagram illustrates the Raspberry Pi GPIO connections
+to the external FTDI-based interface board used in the setup. The
+Raspberry Pi provides the target computing platform on which the
+client-server application and its processing pipeline execute.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.85\textwidth]
+    {images/hardwaresetup.png}
+    \caption{Hardware setup showing the Raspberry Pi GPIO header and
+    the connected FTDI interface board.}
+    \label{fig:hardware-setup}
+\end{figure}
+
 
 \section{Client-Server Communication Sequence}
 Communication between the two processes follows a strict sequence to ensure data integrity and asynchronous notification. 
@@ -519,15 +539,16 @@ Function & Purpose \\
 \section{Block Loader}
 \label{sec:block-loader}
 
-The block loader (\texttt{block\_loader.c}) sits between the virtual sensor and the client's message transmission. Its job is to assemble the continuous stream of samples from the sensor into the exact 64 KiB blocks required by the protocol, and to attach a descriptor to each block. The block size is strictly defined by the protocol: \texttt{PROTO\_BLOCK\_SAMPLES} is 16,384 samples of 32-bit floats, which equals exactly 65,536 bytes (64 KiB).
+The block loader connects the virtual sensor to the client by organizing the incoming sensor samples into fixed-size blocks for transmission. Each block contains 16,384 samples, as defined in the code using the name "\texttt{PROTO\_BLOCK\_SAMPLES}". Since each sample is a 32-bit floating-point value, the total block size is 65,536 bytes (64 KiB). The loader also prepares a descriptor containing the metadata required to identify and validate each block.
 
 \subsection{Handling Multiple File Layouts}
-One of the critical responsibilities of the loader is mapping protocol channels to their physical positions in the file. The dataset provides recordings in two formats: a planar format (one float per sample) and an interleaved format (multiple floats per record). 
 
-The interleaved file stores each record as \texttt{time\_s}, then \texttt{voltage\_V}, \texttt{current\_A} and \texttt{temperature\_K}. Notice that this order differs from the \texttt{PROTO\_CHANNEL\_*} enumeration. To prevent the catastrophic error of sorting the wrong physical signal, the loader centralizes the mapping in a single function. For example, the voltage channel is at index 1 in the file, not index 2.
+The dataset stores recordings in two formats: planar and interleaved. In the planar format, each channel is stored separately, whereas the interleaved format stores multiple channel values together in each record. The loader must account for these differences while ensuring that the correct data is selected for each protocol channel.
+
+In the interleaved format, each record follows the order \texttt{[time\_s, voltage\_V, current\_A, temperature\_K]}. This order must be mapped correctly to the enumeration used by the protocol. To avoid selecting the wrong signal during processing, the loader handles this mapping through a dedicated function. For instance, voltage is stored at index 1, while current is stored at index 2.
 
 % SOURCE: block_loader.c, function block_loader_channel_offset()
-\begin{lstlisting}[caption={Mapping the protocol channel to the interleaved file offset in \texttt{block\_loader.c} (\texttt{block\_loader\_channel\_offset})}, label={lst:loader-offset}]
+\begin{lstlisting}[caption={Mapping protocol channels to interleaved file offsets using \texttt{block\_loader\_channel\_offset}}, label={lst:loader-offset}]
 int block_loader_channel_offset(proto_channel_t channel)
 {
     switch (channel) {
@@ -540,31 +561,21 @@ int block_loader_channel_offset(proto_channel_t channel)
 }
 \end{lstlisting}
 
-To ensure a block is filled in a single, efficient read operation, the loader sets the virtual sensor's \texttt{frame\_samples} field to \texttt{PROTO\_BLOCK\_SAMPLES}. The read-ahead window then spans one whole block, so \texttt{sensor\_read\_block()} returns all 16,384 samples after a single \texttt{fread()}: 64 KiB for a planar file, 256 KiB of four-channel records for an interleaved one.
+The loader also configures the virtual sensor's frame size to match the protocol block size using \texttt{cfg.frame\_samples = PROTO\_BLOCK\_SAMPLES}. This allows \texttt{sensor\_read\_block()} to read the required 16,384 samples in a single operation for a full block, rather than processing each sample individually. This approach keeps the data-loading process straightforward and reduces the overhead associated with repeated read operations.
+
 
 \subsection{Zero-Padding and the Descriptor}
-The block loader must handle the case where the total recording length is not an exact multiple of 16,384 samples. The final block will be partially filled. Because the entire 64 KiB buffer is transmitted across the QNX message bus to another process, sending uninitialized memory from the stack or heap is a security risk. It also breaks determinism, meaning the checksum would change from run to run.
 
-The loader solves this by zeroing the unused tail of the final block. This guarantees that the block is byte-for-byte reproducible. The block descriptor is then populated with the valid sample count, the sequence number, the first sample index, and a checksum (FNV-1a). Crucially, the checksum is calculated only over the valid samples (\texttt{got}), ignoring the zero-padded tail.
+The recording length may not always be an exact multiple of 16,384 samples. In such cases, the final block contains fewer valid samples than the protocol's fixed block capacity. Since the complete 64 KiB buffer is transmitted between processes through the QNX message-passing mechanism, the unused portion must be initialized before transmission. Otherwise, it could contain stale memory contents and produce inconsistent results between executions.
+
+The loader sets all unused sample positions in the final block to zero, so the buffer is predictable even when the recording ends partway through a block. It then fills the block descriptor (sequence number, valid sample count, first sample index, rate, channel, and checksum). The checksum uses FNV-1a hash algorithm and covers only the valid samples, excluding the zero-padded tail.
 
 % SOURCE: block_loader.c, function block_loader_next()
-\begin{lstlisting}[caption={Zero-padding the final block and building the descriptor in \texttt{block\_loader.c} (\texttt{block\_loader\_next})}, label={lst:loader-pad}]
-    /*
-     * A short final block has an unused tail. Clear it: the whole 64 KiB block
-     * crosses to another process, and uninitialised bytes should never travel.
-     * It also makes the block reproducible, so two runs over the same
-     * recording produce identical bytes and identical checksums.
-     */
+\begin{lstlisting}[caption={Zero-padding the final block and populating its descriptor in \texttt{block\_loader\_next}}, label={lst:loader-pad}]
+    /* Zero the unused tail of a short final block. */
     if ((uint32_t)got < PROTO_BLOCK_SAMPLES) {
         memset(&block->samples[got], 0,
                (size_t)(PROTO_BLOCK_SAMPLES - (uint32_t)got) * sizeof(float));
-    }
-
-    min_value = block->samples[0];
-    max_value = block->samples[0];
-    for (i = 1; i < got; i++) {
-        if (block->samples[i] < min_value) min_value = block->samples[i];
-        if (block->samples[i] > max_value) max_value = block->samples[i];
     }
 
     memset(desc, 0, sizeof(*desc));
@@ -575,24 +586,12 @@ The loader solves this by zeroing the unused tail of the final block. This guara
     desc->channel      = (uint32_t)l->channel;
     desc->checksum     = proto_checksum(block->samples,
                                         (size_t)got * sizeof(float));
-    desc->min_value    = min_value;
-    desc->max_value    = max_value;
 
     l->sequence++;
     l->samples += (uint64_t)got;
     return got;
 }
 \end{lstlisting}
-
-\subsection{Verification}
-The correctness of the block loader is verified by comparing the two file layouts. Because the planar and interleaved files carry the exact same recordings, the test suite asserts that reading a planar file and reading an interleaved file through this loader produce \textbf{byte-identical blocks and descriptors}. This proves that the channel offset mapping and read logic are completely independent of the underlying file format.
-
-\begin{figure}[htbp]
-\centering
-% \includegraphics[width=0.9\textwidth]{images/block_loader_flow.pdf}
-\caption{Block loader data flow: reading from the sensor, zero-padding the final block, and populating the descriptor.}
-\label{fig:block-loader}
-\end{figure}
 
 \section{Parallel Merge-Sort}
 \label{sec:mergesort}
@@ -629,55 +628,18 @@ is read and which is written, repeat  until a single run covers the array.
 Figure~\ref{fig:merge-plan} shows the shape of a block on four workers: three
 rounds, seven tasks.
 
+
 \begin{figure}[htbp]
-\centering
-\begin{tikzpicture}[font=\footnotesize\sffamily,
-  run/.style={draw, minimum width=2.5cm, minimum height=0.5cm, inner sep=1pt,
-              align=center},
-  done/.style={run, fill=blue!12},
-  hdr/.style={font=\scriptsize\sffamily, align=center},
-  arr/.style={-{Latex[length=2mm]}}]
-  % phase headers
-  \node[hdr] at (0, 3.1) {phase 0\\\scriptsize 4 partition tasks};
-  \node[hdr] at (4.0, 3.1) {phase 1\\\scriptsize 2 merge tasks};
-  \node[hdr] at (7.9, 3.1) {phase 2\\\scriptsize 1 merge task};
-  % barriers
-  \draw[dashed, gray] (2.0, -2.0) -- (2.0, 2.5);
-  \draw[dashed, gray] (5.95, -2.0) -- (5.95, 2.5);
-  \node[font=\scriptsize\sffamily, rotate=90, gray, xshift=-0.16cm] at (2.0, -1.5) {barrier};
-  \node[font=\scriptsize\sffamily, rotate=90, gray, xshift=-0.16cm] at (5.95, -1.5) {barrier};
-  % phase 0
-  \node[run] (a) at (0, 2.2) {0--4095};
-  \node[run] (b) at (0, 1.4) {4096--8191};
-  \node[run] (c) at (0, 0.6) {8192--12287};
-  \node[run] (d) at (0, -0.2) {12288--16383};
-  % phase 1
-  \node[done] (ab) at (4.0, 1.8) {0--8191};
-  \node[done] (cd) at (4.0, 0.2) {8192--16383};
-  % phase 2
-  \node[done] (abcd) at (7.9, 1.0) {0--16383};
-  % arrows
-  \draw[arr] (a.east) -- (ab.north west);
-  \draw[arr] (b.east) -- (ab.south west);
-  \draw[arr] (c.east) -- (cd.north west);
-  \draw[arr] (d.east) -- (cd.south west);
-  \draw[arr] (ab.east) -- (abcd.north west);
-  \draw[arr] (cd.east) -- (abcd.south west);
-  % buffer notes, below the whole diagram so they cannot overlap a run box
-  \node[font=\scriptsize\sffamily, align=center] at (0, -2.2)
-    {data $\rightarrow$ scratch};
-  \node[font=\scriptsize\sffamily, align=center] at (4.0, -2.2)
-    {scratch $\rightarrow$ data};
-  \node[font=\scriptsize\sffamily, align=center] at (7.9, -2.2)
-    {data $\rightarrow$ scratch};
-\end{tikzpicture}
-\caption{The plan for one 64\,KiB block on four workers. Phase 0 sorts four
-partitions, each into its own slice of the scratch buffer; each later phase
-merges adjacent runs and writes the other buffer, so the answer alternates
-between the caller's array and the scratch. A phase cannot begin until every task
-of the previous one has finished  the dashed barriers.}
-\label{fig:merge-plan}
+    \centering
+    \includegraphics[width=\textwidth]{merge_sort.pdf}
+    \caption{The plan for one 64\,KiB block on four workers. Phase 0 sorts four
+    partitions, each into its own slice of the scratch buffer; each later phase
+    merges adjacent runs and writes the other buffer, so the answer alternates
+    between the caller's array and the scratch. A phase cannot begin until every task
+    of the previous one has finished the dashed barriers.}
+    \label{fig:merge-plan}
 \end{figure}
+
 
 \subsection{The merge, and why the answer is stable}
 
@@ -797,17 +759,311 @@ thousand times faster than the data arrives. Even at the recording's own,
 unevenly sampled rate of about 13.36\,Hz, a block spans 1226\,s of stream.
 
 \section{Rolling Median Filter (Hampel Filter)}
-To remove outliers, the server applies a Hampel-style rolling median filter. The filter calculates the median and Median Absolute Deviation (MAD) of a sliding window. If a sample deviates from the median by more than a configurable threshold (4.0 sigma), it is replaced. This preserves legitimate signal edges while removing sudden spikes.
+
+The server implements a rolling Hampel filter to detect and suppress outliers in time-series sensor data while preserving samples that follow the local signal trend. Unlike a conventional moving-median filter that replaces every sample with the median of its neighbourhood, the Hampel filter replaces a sample only when it deviates significantly from the local median.
+
+\subsection{Window-Based Median and MAD Calculation}
+
+For a sample \(x_i\), the filter extracts a sliding window of odd width \(w\), centred on the current sample. The local median is calculated as
+
+\[
+m_i = \operatorname{median}
+\left(
+x_{i-h},\ldots,x_i,\ldots,x_{i+h}
+\right),
+\qquad h=\frac{w-1}{2}.
+\]
+
+The median absolute deviation (MAD) measures the spread of the samples around this local median:
+
+\[
+\operatorname{MAD}_i =
+\operatorname{median}_{j\in W_i}
+\left|x_j-m_i\right|.
+\]
+
+The robust estimate of the local standard deviation is obtained using the scaling factor 1.4826:
+
+\[
+\sigma_i^{*}=1.4826\,\operatorname{MAD}_i.
+\]
+
+A sample is classified as an outlier if
+
+\[
+|x_i-m_i| > \lambda \sigma_i^{*},
+\]
+
+where \(\lambda\) is the configurable threshold. The implementation uses a default threshold of 4.0. When the condition is satisfied, the output sample is replaced by the local median; otherwise, the original sample is retained.
+
+\subsection{Filter Configuration and Boundary Handling}
+
+The filter supports odd window widths from 3 to 31 samples, with a default width of 9. A width of 9 considers up to four neighbouring samples on each side of the current sample. A larger window can detect wider bursts of abnormal samples, but it increases computational cost and may smooth legitimate short-duration variations.
+
+The filter processes samples in their original time order. Since sorting destroys temporal order, the server maintains separate data paths for sorting and filtering rather than applying the rolling filter to the sorted array.
+
+For block-based processing, neighbouring samples from adjacent blocks are supplied as context. This prevents artificial discontinuities at block boundaries and makes block-wise filtering equivalent to filtering the complete signal, provided the required context is supplied. At the beginning and end of the complete recording, the window is clipped to the samples that actually exist.
+
+The implementation is deterministic and does not allocate memory dynamically during filtering. Each local window is ordered using insertion sort, allowing the median and MAD to be calculated without a separate general-purpose sorting operation.
+
+\section{Client Implementation}
+\label{sec:client}
+
+The client acts as the orchestrator of the pipeline. Its responsibilities include reading the recording, preparing 64 KiB blocks, submitting them to the server, and retrieving the results. Because the system relies on asynchronous events, the client must set up its own receiving channel using \texttt{name\_attach()} before it even connects to the server. If the server is not yet running, the client waits rather than failing immediately.
+
+\subsection{Connection Deadline}
+A strict requirement of the project is that the client must tolerate the server starting slightly late. The client implements a 10-second deadline by repeatedly calling \texttt{name\_open()} with a 250 ms \texttt{nanosleep} delay between attempts. If the server appears within this window, the connection succeeds and the wait time is logged. If the deadline expires, the client prints a descriptive error and exits cleanly, avoiding an indefinite hang.
+
+% SOURCE: client.c, function connect_to_server()
+\begin{lstlisting}[caption={Retrying the server connection with a 10-second deadline}, label={lst:client-retry}]
+static int connect_to_server(const char *name, uint64_t deadline_ns,
+                             uint64_t *waited_ns, int *attempts)
+{
+    uint64_t start = now_ns();
+    int      tries = 0;
+
+    for (;;) {
+        struct timespec pause;
+        uint64_t        elapsed;
+        int             coid = name_open(name, 0);
+
+        tries++;
+        if (coid != -1) {
+            if (waited_ns != NULL) *waited_ns = now_ns() - start;
+            if (attempts != NULL)  *attempts  = tries;
+            return coid;
+        }
+        elapsed = now_ns() - start;
+        if (elapsed >= deadline_ns) {
+            if (waited_ns != NULL) *waited_ns = elapsed;
+            if (attempts != NULL)  *attempts  = tries;
+            return -1;  /* errno is the last name_open failure */
+        }
+        pause.tv_sec  = 0;
+        pause.tv_nsec = (long)CONNECT_RETRY_NS;
+        (void)nanosleep(&pause, NULL);
+    }
+}
+\end{lstlisting}
+
+\subsection{Pipeline Orchestration and Block Preparation}
+The client drives the local data pipeline before interacting with QNX. Before the transmission loop begins, it calls \texttt{block\_loader\_open()} to initialize the virtual sensor and prepare the file layout. Inside the loop, it calls \texttt{block\_loader\_next()} to read the 16,384 samples from disk, zero-pad the final block if necessary, and generate the block descriptor. Only after this local preparation is complete does the client package the header using \texttt{proto\_submit\_prepare()} and trigger the IPC mechanisms. The complete execution flow is shown in Figure~\ref{fig:client-flow}.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{pipeline_flowchart.pdf}
+\caption{Execution flow of the Client. The client loops through the blocks, utilizing QNX message passing. Once the recording ends (EOF), it performs a global sort, filters the data, writes the output files, and exits.}
+\label{fig:client-flow}
+\end{figure}
+
+\subsection{Two-Part IOV Submission}
+To transmit a 64 KiB block, the client avoids copying the payload into a single, massive message buffer. Instead, it uses an Input/Output Vector (IOV) to send the message in two separate parts: the small \texttt{proto\_submit\_t} header and the 64 KiB \texttt{proto\_block\_t} payload. 
+
+The client arms a reply deadline using \texttt{TimerTimeout} and calls \texttt{MsgSendv()}. This allows the QNX kernel to transfer the header and data directly from their respective memory locations. The client then blocks until it receives the server's acknowledgement (ACK), verifying that the message type, job ID, and checksum status are all correct.
+
+% SOURCE: client.c, inside the main block loop
+\begin{lstlisting}[caption={Submitting a block using a two-part IOV}, label={lst:client-iov}]
+        iov_t send_iov[2], reply_iov;
+        
+        /* ... prepare submit and block ... */
+        
+        SETIOV(&send_iov[0], &submit, sizeof(submit));
+        SETIOV(&send_iov[1], &block, sizeof(block));
+        SETIOV(&reply_iov, &ack, sizeof(ack));
+        
+        arm_reply_deadline("submit");
+        
+        if (MsgSendv(server_coid, send_iov, 2, &reply_iov, 1) == -1) {
+            perror("client: MsgSendv submit");
+            goto cleanup;
+        }
+        
+        if (ack.type != PROTO_MSG_ACK || ack.job_id != job_id ||
+            ack.status != PROTO_OK) {
+            fprintf(stderr, "client: submit %u rejected: %s\n",
+                    job_id, proto_status_str(ack.status));
+            goto cleanup;
+        }
+\end{lstlisting}
+
+\subsection{Completion Pulse Handling}
+Because the server processes the block asynchronously, it sends a QNX pulse when the work is done. The client waits for this pulse using \texttt{MsgReceive()} with a 5-second timeout. A QNX pulse can only carry a 32-bit value; however, an IEEE 754 float is also exactly 32 bits. The server bit-casts the calculated median directly into the pulse value. The client extracts this 32-bit integer and bit-casts it back into a float, receiving the median instantly without needing a separate message round-trip.
+
+\subsection{Shared Memory Retrieval}
+After receiving the pulse, the client sends a fetch message to get the result descriptor, which contains the exact byte offsets of the sorted and filtered arrays. 
+
+Instead of transferring 128 KiB (two 64 KiB arrays) back through message passing, the client maps the server's named shared memory object as read-only. It validates the header and the job ID to ensure the slot hasn't been overwritten, and then reads the arrays directly using the supplied offsets. Finally, it recalculates the FNV-1a checksums of the arrays in memory to prove that the data was not corrupted in transit.
+
+\subsection{Final Verification and Output}
+Once all blocks have been offloaded (the loader returns 0), the client's work is not yet done. It performs a local verification and post-processing phase:
+\begin{itemize}
+    \item It sorts the entire recording locally using a serial merge-sort to verify that its global median matches the median the server sent in the final pulse.
+    \item It runs a continuous rolling median filter(Hampel) over the entire raw recording to ensure that block boundaries do not cause artifacts in the final output.
+    \item It writes the processed arrays to disk as \texttt{raw.bin}, \texttt{sorted.bin}, and \texttt{filtered.bin}, alongside a \texttt{medians.csv} file containing the per-block statistics.
+\end{itemize}
+
+\section{Server Implementation}
+\label{sec:server}
+
+The server handles the processing of incoming data blocks. It runs as a QNX channel server, where it receives client requests, checks their validity, and assigns the processing tasks to a pool of worker threads. This allows the server to accept new requests without waiting for the sorting and filtering of previous blocks to finish.
+
+\subsection{Initialization and Resource Allocation}
+
+Before starting the receive loop, the server initializes the resources required for processing. It calls \texttt{shm\_region\_create()} to create and map a named shared memory region that stores the sorted and filtered arrays. Next, \texttt{ms\_pool\_create()} creates the worker thread pool used for parallel merge sort, with the default configuration using one thread per CPU core. Finally, \texttt{name\_attach("sortmed")} registers the server under its service name and creates the QNX channel through which it receives client requests.
+
+\subsection{Two-Stage Reception and Validation}
+
+Since each data block is 64 KiB, the server checks the request header before accepting the entire payload for processing. It first uses \texttt{MsgReceivev()} to receive the 48-byte \texttt{proto\_submit\_t} header. The server checks the protocol version and validates the filter width using \texttt{proto\_submit\_valid()}. It then calls \texttt{proto\_submit\_verify()} to verify the block checksum.
+
+If any validation step fails, the server returns an appropriate error status using \texttt{MsgReply()} and skips further processing of that request. This helps avoid unnecessary work on invalid input.
+
+% SOURCE: server.c, inside the main MsgReceivev loop
+\begin{lstlisting}[caption={Receiving and validating the request header}, label={lst:server-receive}]
+        rcvid = MsgReceivev(attach->chid, riov, 2, &info);
+        /* ... */
+        if (type == PROTO_MSG_SUBMIT) {
+            proto_ack_t ack;
+            memset(&ack, 0, sizeof(ack));
+            ack.type = PROTO_MSG_ACK;
+            ack.job_id = submit.job_id;
+
+            if (submit.version != PROTO_VERSION) {
+                ack.status = PROTO_ERR_VERSION;
+                (void)MsgReply(rcvid, 0, &ack, sizeof(ack));
+                continue;
+            }
+            if (!proto_submit_valid(&submit)) {
+                ack.status = PROTO_ERR_ARGUMENT;
+                (void)MsgReply(rcvid, 0, &ack, sizeof(ack));
+                continue;
+            }
+            if (!proto_submit_verify(&submit, &block)) {
+                ack.status = PROTO_ERR_CHECKSUM;
+                (void)MsgReply(rcvid, 0, &ack, sizeof(ack));
+                continue;
+            }
+\end{lstlisting}
+
+\subsection{Early Acknowledgement}
+
+The server does not keep the client waiting until all the processing is complete. In QNX, the \texttt{rcvid} identifies a received message and is used to reply to that request. Once the reply is sent, that receive ID can no longer be used for the same request.
+
+After validating the submission, the server therefore sends an acknowledgement (ACK) before the computational work begins. The client can then continue with its workflow and wait for a separate completion pulse, while the server proceeds with processing the submitted block.
+
+\subsection{Block Processing and Function Calls}
+
+After acknowledging the request, the server processes the data block through \texttt{process\_submit()}. The function copies the input into a separate array so that the original time order is preserved for filtering. It then performs the following operations:
+
+\begin{enumerate}
+    \item Copies the input samples into a separate array using \texttt{memcpy()}, preserving the original data order.
+    \item Calls \texttt{ms\_sort()} to sort the copied samples using the parallel worker pool.
+    \item Calls \texttt{median\_filter\_block()} to apply the Hampel filter to the original time-ordered samples.
+    \item Uses \texttt{proto\_checksum()} to calculate the FNV-1a checksums of the sorted and filtered arrays.
+    \item Stores the result metadata, including the median, filter width, number of outliers, and checksums, in the \texttt{proto\_result\_t} structure.
+\end{enumerate}
+
+% SOURCE: server.c, inside process_submit()
+\begin{lstlisting}[caption={Sorting, filtering, and preparing the block results}, label={lst:server-process}]
+    /* Preserve the original sample order for filtering. */
+    memcpy(sorted, block->samples, n * sizeof(float));
+
+    /* Sort the block using the parallel worker pool */
+    if (ms_sort(pool, sorted, n) != 0) return -1;
+
+    /* Apply the Hampel filter to the original time-ordered block */
+    if (median_filter_block(&cfg, NULL, 0, block->samples, n, NULL, 0,
+                            filtered, &outliers) != 0)
+        return -1;
+
+    /* Store the result metadata and checksums */
+    job->result.median = median_of_sorted(sorted, n);
+    job->result.filter_width = cfg.width;
+    job->result.outliers_removed = outliers;
+    job->result.sorted_checksum = proto_checksum(sorted, n * sizeof(float));
+    job->result.filtered_checksum = proto_checksum(filtered, n * sizeof(float));
+\end{lstlisting}
+
+\subsection{Global Run Aggregation}
+
+In addition to processing individual blocks, the server calculates the median of the complete recording. To do this, it maintains a global sorted array that is updated as each block is processed. The function \texttt{run\_merge\_block()} merges each block's sorted samples into this array. When a submission carries the \texttt{PROTO\_SUBMIT\_LAST} flag, the server calls \texttt{run\_publish()} to store the final \texttt{proto\_run\_t} descriptor in shared memory, including the global median.
+
+\subsection{Asynchronous Pulse Notification}
+
+After processing a block, the server notifies the client that the results are ready. Since the original request has already been acknowledged, its \texttt{rcvid} is no longer available for notification. The server instead uses \texttt{name\_open()} to obtain a connection to the client's registered channel, \texttt{sortmed-client}.
+
+The server converts the block median into a 32-bit pulse value using \texttt{proto\_float\_to\_pulse()}. This allows the median to be included in the completion pulse, along with a code derived from the job ID. The server sends the pulse using \texttt{MsgSendPulse()}. Once the notification attempt is complete, it closes the connection using \texttt{name\_close()}.
+
+% SOURCE: server.c, resolving the client and sending the pulse
+\begin{lstlisting}[caption={Sending a completion pulse to the client}, label={lst:server-pulse}]
+            float pulse_median = jobs[free_index].result.median;
+            int coid = name_open(CLIENT_NAME, 0);
+
+            if (coid == -1 ||
+                MsgSendPulse(coid, SIGEV_PULSE_PRIO_INHERIT,
+                             PROTO_PULSE_DONE + (int)submit.job_id,
+                             proto_float_to_pulse(pulse_median)) == -1) {
+                perror("sortmed-server: completion pulse");
+            }
+            if (coid != -1) {
+                name_close(coid);
+            }
+\end{lstlisting}
 
 \section{QNX IPC Mechanisms}
-\subsection{Message Passing and IOV}
-Large data blocks are transferred using \texttt{MsgSendv} (Input/Output Vectors) to avoid copying the 64 KB buffer into a single contiguous message.
+\label{sec:qnx-ipc}
 
-\subsection{QNX Pulses and Asynchronous Notification}
-Upon completion, the server sends a pulse. Because a pulse value is limited to 32 bits, the float representation of the calculated median is bit-cast directly into the pulse payload. The pulse code carries the Job ID.
+The system uses three QNX inter-process communication (IPC) mechanisms to exchange requests, notify the client, and transfer the processed results. Each mechanism serves a different purpose in the processing pipeline.
 
-\subsection{Shared Memory}
-To avoid sending the large processed arrays back over IPC, the server maps a named shared memory region (\texttt{/dev/shmem/sortmed-results}). The server writes the sorted and filtered arrays directly into this region, and the client maps it read-only to retrieve the results.
+\begin{itemize}
+    \item \textbf{Message Passing (IOV):} The client uses \texttt{MsgSendv()} to send the 48-byte header and the 64 KiB data block using separate I/O vector entries in a single call. This allows the header and payload to be provided from different memory locations without first combining them into a single buffer.
+
+    \item \textbf{QNX Pulses:} Since processing takes several milliseconds, the server sends an acknowledgement (ACK) after validating the request instead of keeping the client waiting for the entire operation. Once processing is complete, it uses \texttt{MsgSendPulse()} to notify the client. The calculated median is encoded in the 32-bit pulse value field.
+
+    \item \textbf{Shared Memory:} Sending the sorted and filtered arrays back through message passing would add unnecessary data transfer overhead. The server instead writes both arrays to the named shared memory object \texttt{/dev/shmem/sortmed-results}. The client maps this region as read-only and accesses the results directly, avoiding the need for another large message transfer.
+\end{itemize}
+
+\section{End-to-End Pipeline Execution}
+\label{sec:pipeline}
+
+The complete pipeline combines the client, server, worker threads, and shared memory to process each 64 KiB data block. The client submits the data and receives an acknowledgement before the server begins the main computation. Once processing is complete, the server notifies the client using a QNX pulse. This allows the two sides to handle submission and processing without keeping the original request open until the results are ready.
+
+Figure~\ref{fig:pipeline-execution} shows the overall data flow for a single block.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=\textwidth]{pipeline_general.pdf}
+    \caption{End-to-end execution of a 64 KiB data block. Message passing handles requests and control signals, shared memory stores the processed arrays, and QNX pulses notify the client when processing is complete.}
+    \label{fig:pipeline-execution}
+\end{figure}
+
+\subsection{Phase 1: Local Preparation and Submission}
+
+The process starts on the client side, where \texttt{block\_loader\_next()} reads up to 16,384 samples from the dataset. If the final block contains fewer samples, the remaining positions are zero-padded. The client then calculates the FNV-1a checksum and prepares the request using a 48-byte \texttt{proto\_submit\_t} header and a 64 KiB \texttt{proto\_block\_t} payload.
+
+The client submits both parts using \texttt{MsgSendv()}. On the server side, \texttt{MsgReceivev()} receives the request, after which the server checks the protocol version, filter width, and checksum. If the request passes validation, the server sends an acknowledgement (ACK) to the client.
+
+The ACK is sent before the main processing begins. This allows the client to continue its execution and wait for a completion pulse rather than remaining blocked until sorting and filtering are finished. The original request is therefore completed separately from the later notification of the results.
+
+\subsection{Phase 2: Computation and Publication}
+
+After acknowledging the request, the server processes the submitted block using \texttt{process\_submit()}. The main operations are:
+
+\begin{enumerate}
+    \item The raw samples are copied into a designated shared memory slot, preserving their original time order.
+    \item The server calls \texttt{ms\_sort()} to sort the samples using the worker thread pool. The sorted data is stored separately from the raw samples.
+    \item The function \texttt{median\_filter\_block()} applies the Hampel filter to the original time-ordered data and stores the filtered output in another slot.
+    \item The server calculates the output checksums and fills the \texttt{proto\_result\_t} descriptor with the result metadata.
+\end{enumerate}
+
+After preparing the results, the server obtains a connection to the client's registered channel and sends a completion pulse using \texttt{MsgSendPulse()}. The calculated median is encoded in the 32-bit pulse value, while the pulse code identifies the job. The client can therefore receive the completion notification without requiring the server to reopen the original request.
+
+\subsection{Phase 3: Retrieval and Post-Processing}
+
+The client waits for the completion pulse using \texttt{MsgReceive()}. When the pulse arrives, it extracts the median and sends a separate fetch request using \texttt{MsgSend()} to obtain the result descriptor. This descriptor provides the offsets of the sorted and filtered arrays in shared memory.
+
+Since the client has already mapped the shared memory region as read-only, it can access the arrays directly using these offsets. It also recalculates their FNV-1a checksums to verify that the retrieved data matches the expected results.
+
+After all blocks have been processed, the client completes the remaining post-processing steps. These include calculating the global median, applying the required final filtering across the recording, and writing the output files: \texttt{raw.bin}, \texttt{sorted.bin}, \texttt{filtered.bin}, and \texttt{medians.csv}.
 
 \section{Testing}
 \label{sec:testing}
@@ -821,7 +1077,7 @@ computed some other way, and to make the system prove that it refuses what it
 should refuse.
 
 Three words are used throughout, so they are worth defining. A \emph{check} is one
-assertion --- this value equals that one, this call returns $-1$. A \emph{test} is
+assertion: this value equals that one, this call returns $-1$. A \emph{test} is
 a named group of checks exercising one behaviour, and a \emph{suite} is one binary
 that runs a group of tests and prints a verdict. The counting is per check because
 a test that quietly covers half of its cases still passes. ``0 skipped'' means
@@ -849,12 +1105,12 @@ The board returns the same counts for the same suites, which is the point: with
 the code held constant, the only thing left that could differ is the kernel, and
 that is what the message passing, the pulse and the shared results region
 exercise. The board run is therefore a confirmation of the host run rather than a
-separate experiment --- a disagreement would point at the environment, and
+separate experiment; a disagreement would point at the environment, and
 agreement means the behaviour is not an accident of one toolchain.
 
 \subsection{Four kinds of evidence}
 
-\begin{table}[htbp]
+\begin{table}[H]
 \centering
 \caption{The kinds of evidence the suites use, and why each is convincing.}
 \label{tab:test-evidence}
@@ -872,7 +1128,7 @@ Deliberate bad input & a 3-byte file, a 6-float record, a NULL path, one nudged 
 
 \subsection{The suites and what they establish}
 
-\begin{table}[htbp]
+\begin{table}[H]
 \centering
 \caption{The six suites. The checks are per suite; the total is the figure quoted
 for both folds. The KPI suite is a benchmark and is counted separately.}
@@ -919,7 +1175,7 @@ The screenshots that follow are the console as it was captured, one per suite, p
 the two board scripts, \texttt{client-wait-test.sh} and \texttt{soak.sh}. They are
 the evidence rather than the summary: the test names scroll past with
 their verdicts, and the suites that reject bad input print the refusals they
-provoked --- every one of those lines is followed by \texttt{ok}.
+provoked; every one of those lines is followed by \texttt{ok}.
 
 \begin{figure}[htbp]
 \centering
@@ -933,7 +1189,7 @@ layout and the seal's sensitivity, 186 checks.}
 \centering
 \includegraphics[width=\linewidth]{photos/test_sensor.png}
 \caption{The sensor suite on the board. The \texttt{sensor:} lines are the test
-failing on purpose --- a missing file, a 3-byte file, a 6-float record --- each
+failing on purpose (a missing file, a 3-byte file, a 6-float record), each
 followed by \texttt{ok}.}
 \label{fig:test-sensor}
 \end{figure}
@@ -1004,32 +1260,393 @@ deadline test exercises the deadline on connection, not on completion.
 \chapter{Results and Discussions}
 
 \section{Experimental Setup}
-This section describes the environment and the dataset used for the performance evaluations on the Raspberry Pi 4 board.
+
+The experiments were conducted on a Raspberry Pi 4 running QNX Neutrino
+RTOS. The target system was used to evaluate the complete client-server
+pipeline, including block transfer, parallel merge-sort, rolling Hampel
+filtering, shared-memory result retrieval and completion notification.
+
+The input was a recorded battery sensor dataset,
+\texttt{Chen2020\_c1\_T25\_discharge.bin}, replayed through the virtual
+sensor interface. The recording contains 60,000 samples per selected
+channel, stored as single-precision floating-point values. The configured
+nominal sensor rate was 100 Hz, and the recording used the interleaved
+layout containing time, voltage, current and temperature.
+
+The client assembled blocks of 16,384 samples, corresponding to 64 KiB
+per full block. A complete 60,000-sample recording was processed in
+four blocks, with the last block containing the remaining 10,848 samples.
+
+The server used a four-worker merge-sort pool for the window-width
+experiments. The filter-width sweep covered widths of 3, 5, 7, 9, 11,
+13, 15, 21 and 31 samples, with three repetitions per channel and width.
+A separate worker-count sweep evaluated one, two, three and four workers
+at the default filter width of 9.
+
+The evaluation included functional correctness, filter quality, processing
+time, repeated-run consistency and shared-memory bounds. Since the input
+was replayed from a recording, the experiments validate execution on the
+QNX hardware target but do not represent measurements from a physical
+sensor connected directly to the board.
+
+
+% ============================================================
+% OVERALL FILTER QUALITY AND WIDTH SWEEP
+% ============================================================
 
 \section{Filter Quality and Outlier Removal (Width Sweep)}
-This section presents the quality of the Hampel filter across different window widths against the ground-truth mask.
 
-\textit{[Insert Figure: width\_quality.png Here]}
+\subsection{Overall Filter Quality}
 
-\textit{[Insert Figure: error\_map.png Here]}
+The effect of filter width was evaluated on the Raspberry Pi 4 running
+QNX Neutrino RTOS. The experiments used the recorded battery sensor
+dataset and tested window widths of 3, 5, 7, 9, 11, 13, 15, 21 and
+31 samples. Each configuration was executed three times.
+
+Filter quality was evaluated for the voltage, current and temperature
+channels using outlier-detection recall, the rate of replacing samples
+not marked as outliers, and the change in reconstruction error after
+filtering. These metrics assess both the ability to suppress abnormal
+readings and the risk of altering valid measurements.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.88\textwidth]
+    {run-figures/perf-width/width_quality.png}
+    \caption{Filter quality metrics for different rolling-window widths.}
+    \label{fig:width-quality}
+\end{figure}
+
+The width sweep illustrates the trade-off between outlier detection
+and preservation of clean samples. A wider window provides a larger
+neighbourhood for estimating the local median and MAD. However,
+increasing the window width also increases computational cost and
+may affect legitimate short-duration signal variations.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.92\textwidth]
+    {run-figures/error_map.png}
+    \caption{Error map comparing the raw and filtered sensor data
+    against the reference signal.}
+    \label{fig:filter-error-map}
+\end{figure}
+
+The error map complements the quality metrics by showing the
+distribution of errors across the evaluated data. The quality and
+error plots should be interpreted together, since reducing
+reconstruction error does not necessarily mean that every injected
+outlier has been detected or that every valid sample has been preserved.
+
+The numerical results also demonstrate the effect of window width.
+When the width increases from 9 to 15 samples, voltage outlier recall
+increases from 73.77\% to 98.55\%, current recall increases from
+63.57\% to 85.20\%, and temperature recall increases from 68.24\%
+to 93.60\%. The corresponding RMSE decreases from 0.0039 to 0.0020
+for voltage, from 0.0147 to 0.0085 for current, and from 0.1170 to
+0.0638 for temperature.
+
+These results indicate that a wider window performs better for the
+injected outlier patterns in this dataset. However, the additional
+processing cost must also be considered when selecting the operating
+width. The default width of 9 is therefore a configuration choice
+rather than a universally optimal setting.
+
+
+\begin{table}[htbp]
+    \centering
+    \caption{Filter quality comparison for window widths of 9 and 15 samples.}
+    \label{tab:filter-quality}
+    \begin{tabular}{@{}lrrrr@{}}
+        \hline
+        Channel & Recall (9) & Recall (15) & RMSE (9) & RMSE (15) \\
+        \hline
+        Voltage     & 73.77\% & 98.55\% & 0.0039 & 0.0020 \\
+        Current     & 63.57\% & 85.20\% & 0.0147 & 0.0085 \\
+        Temperature & 68.24\% & 93.60\% & 0.1170 & 0.0638 \\
+        \hline
+    \end{tabular}
+\end{table}
+Table~\ref{tab:filter-quality} shows that increasing the window
+width from 9 to 15 samples improves outlier recall and reduces
+RMSE across all three evaluated channels. This indicates improved
+detection of the injected outliers for the tested dataset, although
+the increased computational cost must also be considered.
+
+
+
+% ============================================================
+% CHANNEL-WISE FILTERING RESULTS
+% ============================================================
+
+\section{Channel-Wise Filtering Results}
+
+The effect of the rolling Hampel filter was examined separately for
+the voltage, current and temperature channels. For each channel, the
+full signal overlay shows the overall behaviour of the filter, the
+zoomed view highlights its local effect, and the error plot provides
+a complementary view of the changes introduced by filtering.
+
+\subsection{Voltage Channel}
+
+The voltage overlay illustrates the overall effect of filtering,
+while the zoomed view provides a closer examination of local
+variations. The error plot complements these visual observations
+by showing the deviation introduced by filtering. These figures
+should be interpreted alongside the voltage-channel recall and
+RMSE measurements to assess outlier suppression and signal
+preservation.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.95\textwidth]
+    {run-figures/filter_overlay_voltage.png}
+    \caption{Raw and filtered voltage signals using the rolling
+    Hampel filter.}
+    \label{fig:voltage-filter-overlay}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.95\textwidth]
+    {run-figures/filter_zoom_voltage.png}
+    \caption{Zoomed view of the raw and filtered voltage signals,
+    highlighting the local effect of Hampel filtering.}
+    \label{fig:voltage-filter-zoom}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.95\textwidth]
+    {run-figures/filter_error_voltage.png}
+    \caption{Filtering error for the voltage channel.}
+    \label{fig:voltage-filter-error}
+\end{figure}
+
+\subsection{Current Channel}
+
+The current-channel results show the effect of filtering on the
+current measurements at both the overall and local scales. The
+zoomed view helps examine individual signal variations, while the
+error plot shows the changes introduced by the filter. The results
+can be assessed quantitatively using the current-channel recall
+and RMSE values reported in the width-sweep analysis.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.95\textwidth]
+    {run-figures/filter_overlay_current.png}
+    \caption{Raw and filtered current signals using the rolling
+    Hampel filter.}
+    \label{fig:current-filter-overlay}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.95\textwidth]
+    {run-figures/filter_zoom_current.png}
+    \caption{Zoomed view of the raw and filtered current signals,
+    highlighting the local effect of Hampel filtering.}
+    \label{fig:current-filter-zoom}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.95\textwidth]
+    {run-figures/filter_error_current.png}
+    \caption{Filtering error for the current channel.}
+    \label{fig:current-filter-error}
+\end{figure}
+
+\subsection{Temperature Channel}
+
+The temperature-channel results illustrate how the filter affects
+the temperature trend and local variations. The full overlay and
+zoomed view provide complementary visual perspectives, while the
+error plot helps assess the changes introduced by filtering. These
+observations should be considered together with the temperature
+recall and RMSE measurements.
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.95\textwidth]
+    {run-figures/filter_overlay_temperature.png}
+    \caption{Raw and filtered temperature signals using the rolling
+    Hampel filter.}
+    \label{fig:temperature-filter-overlay}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.95\textwidth]
+    {run-figures/filter_zoom_temperature.png}
+    \caption{Zoomed view of the raw and filtered temperature signals,
+    highlighting the local effect of Hampel filtering.}
+    \label{fig:temperature-filter-zoom}
+\end{figure}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.95\textwidth]
+    {run-figures/filter_error_temperature.png}
+    \caption{Filtering error for the temperature channel.}
+    \label{fig:temperature-filter-error}
+\end{figure}
 
 \section{Processing Cost and Timing Analysis}
-This section discusses the execution time per 64 KB block and how it scales with the filter width.
 
-\textit{[Insert Figure: width\_cost.png Here]}
+The computational cost of the filter was measured using the server's
+per-block timing instrumentation. Each full block contains 16,384
+single-precision floating-point samples, corresponding to 65,536 bytes
+(64 KiB). The reported timings separate sorting, filtering and total
+server-side processing.
 
-\textit{[Insert Figure: width\_tradeoff.png Here]}
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.92\textwidth]
+{run-figures/perf-width/width_cost.png}
+\caption{Measured sorting, filtering and total server processing time
+as a function of rolling-window width.}
+\label{fig:width-cost}
+\end{figure}
+
+The measurements show that filtering becomes more expensive as the
+window width increases. The median and MAD must be evaluated for every
+sample, and the local window operations grow with the number of samples
+considered. Consequently, a wider window improves the ability to detect
+longer abnormal bursts but increases processing latency.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.92\textwidth]
+{run-figures/perf-width/width_tradeoff.png}
+\caption{Trade-off between filtering quality and computational cost
+for the voltage channel.}
+\label{fig:width-tradeoff}
+\end{figure}
+
+The trade-off plot helps select a practical operating width rather than
+maximizing outlier recall alone. The default width of 9 provides a
+configurable starting point for balancing signal cleaning and processing
+cost. The final choice depends on the tolerated latency and the duration
+of the abnormal events that the application must detect.
 
 \section{Parallel Sorting Performance}
-This section briefly evaluates the execution time and speedup achieved by the parallel merge-sort on the four cores of the Raspberry Pi 4.
+
+The parallel merge-sort was evaluated on the Raspberry Pi 4 using
+one, two, three and four worker threads. The filter width was held
+constant at its default value of 9 so that the effect of worker count
+on sorting performance could be examined independently.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.92\textwidth]
+{run-figures/perf-threads/threads_scaling.png}
+\caption{Measured processing cost and speedup as the number of
+merge-sort worker threads increases.}
+\label{fig:thread-scaling}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.92\textwidth]
+{run-figures/perf-threads/threads_stages.png}
+\caption{Distribution of processing time across pipeline stages
+for different merge-sort worker counts.}
+\label{fig:thread-stages}
+\end{figure}
+
+Increasing the number of workers can reduce the sorting time by
+allowing independent portions of the data to be processed concurrently.
+However, the overall processing time also depends on merge-phase
+synchronization, the rolling filter and other server operations.
+Therefore, improvements in sorting time do not necessarily translate
+into an equivalent reduction in end-to-end latency.
+
+The worker-count results should be interpreted using both figures:
+the scaling plot summarizes the change in performance, while the
+stage breakdown identifies which operations continue to contribute
+to total processing time.
+
 
 \section{System Overhead and IPC}
-This section discusses the latency introduced by the QNX IPC mechanisms (message passing and shared memory).
+
+\subsection{QNX Board Execution and Validation}
+
+The complete application was executed on the Raspberry Pi 4 running
+QNX Neutrino RTOS. The board tests exercised the protocol, virtual
+sensor, block loader, merge-sort implementation, median filter and
+shared-memory subsystem. Additional scripts tested client connection
+retry behaviour and repeated pipeline execution.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.92\textwidth]{photos/boot.png}
+\caption{Boot evidence from the QNX target environment.}
+\label{fig:qnx-board-boot}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.92\textwidth]
+{photos/pipeline_run_end.png}
+\caption{Completion of the processing pipeline on the QNX target.}
+\label{fig:board-pipeline-complete}
+\end{figure}
+
+The execution evidence demonstrates that the application was run on
+the target platform rather than being validated exclusively through
+host-side compilation. The functional tests were used to check data
+integrity, filtering behaviour, sorting correctness and shared-memory
+access.
+
+The median filter suite checks the implementation against a reference
+filter and exercises boundary conditions, abnormal sample patterns,
+block transitions and invalid arguments. The test results provide
+evidence of functional correctness for the tested cases.
+
+\begin{table}[htbp]
+    \centering
+    \caption{Measured average timing of the QNX processing pipeline
+    for the voltage channel at filter width 15.}
+    \label{tab:hardware-timing}
+    \begin{tabular}{@{}lr@{}}
+        \hline
+        Operation & Average time (ms) \\
+        \hline
+        Block submission & 0.194 \\
+        Server service & 13.172 \\
+        Result fetch & 0.084 \\
+        Total block time & 13.450 \\
+        \hline
+    \end{tabular}
+\end{table}
+Table~\ref{tab:hardware-timing} shows that server-side processing
+accounts for most of the measured block time in this configuration.
+Submission and result retrieval contribute comparatively little
+overhead. These measurements apply to the tested voltage-channel
+configuration and should not be interpreted as universal execution
+times for every filter width or input channel.
 
 % ============================================================
 % CHAPTER 5
 % ============================================================
 \chapter{Conclusion and Scope for Further Research}
+
+\section{Practical Industrial Applications}
+\label{sec:applications}
+
+The techniques used in this project, including parallel sorting, outlier filtering, and asynchronous IPC, are relevant to several embedded systems applications. The combination of these methods allows large data blocks to be processed efficiently while keeping communication overhead manageable. Some potential applications are discussed below.
+
+\begin{itemize}
+    \item \textbf{Battery Management Systems (BMS):} Battery monitoring systems collect voltage, current, and temperature measurements that may contain sudden spikes due to electrical switching or sensor noise. A rolling Hampel filter can help identify and remove these outliers, while sorting the measurements can support the analysis of cell voltage distributions and the identification of cells that may require further inspection.
+
+    \item \textbf{Industrial Edge Gateways:} Industrial systems continuously collect data from vibration, temperature, and other sensors. Processing these measurements in fixed-size blocks using a worker-thread pool can improve throughput and reduce the processing burden on the main application thread. This helps separate data processing from time-sensitive monitoring and control tasks.
+
+    \item \textbf{Automotive Sensor Processing (ADAS):} Advanced Driver Assistance Systems use measurements from sources such as radar, wheel-speed sensors, and other vehicle sensors. Filtering outliers and calculating statistics such as the median can help improve the quality of sensor data used by downstream processing. These operations may be implemented on real-time operating systems such as QNX, where predictable response times are important.
+
+    \item \textbf{Flight and Railway Recorders:} These systems collect continuous streams of operational and sensor data for monitoring, analysis, and later investigation. Processing data in blocks, calculating checksums, and storing results in shared memory can support efficient data handling and integrity checks before the results are archived.
+\end{itemize}
 
 \section{Conclusion}
 The project successfully implemented a real-time client-server architecture on QNX. The system demonstrated effective parallel sorting using POSIX threads and robust outlier removal using a Hampel filter. The use of QNX pulses and shared memory provided an efficient, low-latency method for data transfer and asynchronous notification.
@@ -1042,31 +1659,5 @@ Future work could include:
     \item Exploring alternative sorting algorithms (e.g., Radix Sort) for floating-point data.
     \item Adding a graphical user interface (GUI) for live monitoring of the metrics.
 \end{itemize}
-
-% ============================================================
-% REFERENCES
-% ============================================================
-\clearpage
-\addcontentsline{toc}{chapter}{References}
-
-\begin{thebibliography}{9}
-
-\bibitem{qnx}
-QNX Software Systems,
-``QNX Neutrino RTOS Programmer's Guide,''
-BlackBerry Limited, 2023.
-
-\bibitem{pybamm}
-V. Sulzer, S. G. Marquis, R. Timms, M. Robinson, and D. A. Howey,
-``Python Battery Mathematical Modelling (PyBaMM),''
-\textit{Journal of Open Research Software}, vol. 9, no. 1, 2021.
-
-\bibitem{hampel}
-F. R. Hampel,
-``The influence curve and its role in robust estimation,''
-\textit{Journal of the American Statistical Association},
-vol. 69, no. 346, pp. 383--393, 1974.
-
-\end{thebibliography}
 
 \end{document}
